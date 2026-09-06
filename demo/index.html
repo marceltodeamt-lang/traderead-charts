@@ -22,12 +22,14 @@
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.4</h1>
+  <h1>TradeRead Charts v0.5</h1>
   <div class="grp" id="tfs"></div>
   <label class="ind"><input type="checkbox" id="iEma" checked> EMA <input type="number" id="pEma1" value="20" min="2" max="400"> / <input type="number" id="pEma2" value="50" min="2" max="400"></label>
   <label class="ind"><input type="checkbox" id="iRsi" checked> RSI <input type="number" id="pRsi" value="14" min="2" max="100"></label>
   <label class="ind"><input type="checkbox" id="iMacd" checked> MACD 12/26/9</label>
   <label class="ind"><input type="checkbox" id="iStoch"> Stoch <input type="number" id="pStK" value="14" min="2" max="100">/<input type="number" id="pStD" value="3" min="1" max="50">/<input type="number" id="pStS" value="3" min="1" max="50"></label>
+  <label class="ind"><input type="checkbox" id="iVwap"> VWAP</label>
+  <label class="ind"><input type="checkbox" id="iBb"> BB <input type="number" id="pBb" value="20" min="2" max="200">/<input type="number" id="pBbM" value="2" min="1" max="5" step="0.5"></label>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
 <div style="position:relative;">
@@ -36,7 +38,9 @@
     <button data-tool="trend" title="Trend line">&#9585;</button>
     <button data-tool="hline" title="Horizontal line">&#8213;</button>
     <button data-tool="rect" title="Rectangle">&#9645;</button>
-    <button id="clearDraw" title="Clear drawings">&#10005;</button>
+    <button data-tool="fib" title="Fibonacci retracement">F</button>
+    <button data-tool="text" title="Text">T</button>
+    <button id="delSel" title="Delete selected (Del)">&#10005;</button>
   </div>
   <div id="chart"></div>
 </div>
@@ -103,6 +107,33 @@
     }
     return out;
   }
+  // Session VWAP: resets at each UTC day open, like the production widget.
+  function vwapSeries() {
+    var out = [], pv = 0, vol = 0, day = null;
+    bars.forEach(function (b) {
+      var d = Math.floor(b.time / 86400);
+      if (d !== day) { day = d; pv = 0; vol = 0; }
+      var typ = (b.high + b.low + b.close) / 3;
+      pv += typ * (b.volume || 1); vol += (b.volume || 1);
+      out.push({ time: b.time, value: pv / vol });
+    });
+    return out;
+  }
+  function bbSeries(period, mult) {
+    var mid = [], up = [], lo = [], win = [];
+    bars.forEach(function (b) {
+      win.push(b.close);
+      if (win.length > period) win.shift();
+      if (win.length === period) {
+        var m = win.reduce(function (a, x) { return a + x; }, 0) / period;
+        var sd = Math.sqrt(win.reduce(function (a, x) { return a + (x - m) * (x - m); }, 0) / period);
+        mid.push({ time: b.time, value: m });
+        up.push({ time: b.time, value: m + mult * sd });
+        lo.push({ time: b.time, value: m - mult * sd });
+      }
+    });
+    return { mid: mid, up: up, lo: lo };
+  }
   function stochSeries(kP, dP, smooth) {
     var raw = [];
     for (var i = kP - 1; i < bars.length; i++) {
@@ -120,11 +151,19 @@
   function on(id) { return document.getElementById(id).checked; }
   function rebuild() {
     chart.removeOscPanes();
-    chart.removeLine("ema1"); chart.removeLine("ema2");
+    ["ema1","ema2","vwap","bbU","bbM","bbL"].forEach(function (id) { chart.removeLine(id); });
     chart.setData(bars);
+    chart.setPersistKey("trc-demo:" + tfSec);   // desenele persista per timeframe
     if (on("iEma")) {
       chart.addLine("ema1", emaSeries(val("pEma1") || 20), "#f0b429", 1.4);
       chart.addLine("ema2", emaSeries(val("pEma2") || 50), "#58a6ff", 1.4);
+    }
+    if (on("iVwap")) chart.addLine("vwap", vwapSeries(), "#e879f9", 1.4);
+    if (on("iBb")) {
+      var bb = bbSeries(val("pBb") || 20, parseFloat(document.getElementById("pBbM").value) || 2);
+      chart.addLine("bbU", bb.up, "rgba(100,116,139,0.8)", 1);
+      chart.addLine("bbM", bb.mid, "rgba(100,116,139,0.5)", 1);
+      chart.addLine("bbL", bb.lo, "rgba(100,116,139,0.8)", 1);
     }
     var pane = 1;
     if (on("iRsi")) {
@@ -150,7 +189,7 @@
       pane++;
     }
   }
-  ["iEma","pEma1","pEma2","iRsi","pRsi","iMacd","iStoch","pStK","pStD","pStS"].forEach(function (id) {
+  ["iEma","pEma1","pEma2","iRsi","pRsi","iMacd","iStoch","pStK","pStD","pStS","iVwap","iBb","pBb","pBbM"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", rebuild);
   });
 
@@ -220,7 +259,7 @@
     });
   });
   chart.onToolDone(function () { railPaint(""); });
-  document.getElementById("clearDraw").addEventListener("click", function () { chart.clearDrawings(); });
+  document.getElementById("delSel").addEventListener("click", function () { chart.deleteSelected(); });
 
   bars = genBars();
   rebuild();

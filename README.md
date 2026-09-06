@@ -6,9 +6,19 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0 — core engine.** Candles, volume, line overlays, adaptive
-price/time scales, crosshair, wheel/drag/touch navigation, price lines,
-live bar updates, built-in TradeRead mark.
+**Status: v0.5.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
+guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
+retracement, text) with selection, move, resize, delete and per-key
+persistence, adaptive price/time scales, pane-aware crosshair,
+wheel/trackpad/drag/touch navigation, light & dark palettes, live bar
+updates, built-in TradeRead mark.
+
+Hard-won rules carried over from the production widget: drawings anchor
+to (time, price) because lazy history prepends bars and shifts indices;
+the price pane autoscales from bars alone so a distant EMA cannot squash
+the candles; persisted JSON strips cached text widths; Delete never
+fires while a form field has focus.
 
 ## Quick start
 
@@ -24,11 +34,14 @@ live bar updates, built-in TradeRead mark.
 ```
 
 ## Roadmap to parity with the production widget
-- [ ] Sub-panes (RSI / MACD / Stochastic) with draggable separators
+- [x] Sub-panes (RSI / MACD / Stochastic)
+- [x] Drawing set with selection, move, resize, persistence
+- [x] Light theme palette
+- [ ] Draggable pane separators
 - [ ] Area/baseline/bar series types
 - [ ] Markers, per-bar coloring API
 - [ ] Kinetic scroll feel tuning; pinch anchor refinement
-- [ ] Light theme palette parity
+- [ ] Mobile drawing hardening (pointer capture + touch lock, as in production)
 
 ## License
 Free for commercial and personal use under the TradeRead Community

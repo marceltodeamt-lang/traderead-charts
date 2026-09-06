@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.4.0
+ * TradeRead Charts v0.5.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -91,7 +91,10 @@
         if (b.high > max) max = b.high;
       }
     }
-    for (id in this.lines) {
+    // The price pane scales from BARS alone: overlays ride the frame. An
+    // EMA200 far from price once pinned the candles to the top of the pane
+    // (owner, 28 Aug: "TV e central") — that lesson is now structural.
+    if (this.kind !== "price") for (id in this.lines) {
       var ln = this.lines[id];
       for (i = lo; i <= hi; i++) {
         b = bars[i]; if (!b) continue;
@@ -125,9 +128,13 @@
     this.bars = [];
     this.panes = [new Pane(this, "price")];
     this.priceLines = [];
-    this.drawings = [];             // {type:"trend"|"hline"|"rect", i1,p1, i2,p2} in bar-index/price space
-    this.tool = null;               // null = cursor; "trend"|"hline"|"rect"
+    this.drawings = [];             // {id, type, t1,p1, t2,p2, text?, size?} in (time, price) space
+    this.tool = null;               // null = cursor (select/move); tools mirror the production rail
     this._draft = null;
+    this._selected = null;
+    this._dragDraw = null;          // {d, handle:"p2"|null, t0, v0, orig}
+    this._persistKey = null;
+    this._saveT = null;
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = 0;
     this.crosshairCb = null;
@@ -214,6 +221,29 @@
     return null;
   };
 
+  // Drawings anchor to (time, price): the production widget's lazy history
+  // PREPENDS bars and shifts every index — a lesson already paid for once.
+  Chart.prototype.timeToIndex = function (t) {
+    var b = this.bars, n = b.length;
+    if (!n) return 0;
+    var sec = this._barSec || 3600;
+    if (t <= b[0].time) return (t - b[0].time) / sec;
+    if (t >= b[n - 1].time) return n - 1 + (t - b[n - 1].time) / sec;
+    var lo = 0, hi = n - 1;
+    while (hi - lo > 1) { var m = (lo + hi) >> 1; if (b[m].time <= t) lo = m; else hi = m; }
+    return lo + (t - b[lo].time) / Math.max(1, b[hi].time - b[lo].time);
+  };
+  Chart.prototype.indexToTime = function (i) {
+    var b = this.bars, n = b.length;
+    if (!n) return 0;
+    var sec = this._barSec || 3600;
+    var r = Math.round(i);
+    if (r >= 0 && r < n) return b[r].time + (i - r) * sec;
+    if (r < 0) return b[0].time + i * sec;
+    return b[n - 1].time + (i - (n - 1)) * sec;
+  };
+  Chart.prototype.timeToX = function (t) { return this.indexToX(this.timeToIndex(t)); };
+
   Chart.prototype.indexToX = function (i) {
     return this._plotW() - (this.rightIndex + this.opt.rightPadBars - i) * this.barSpacing;
   };
@@ -287,34 +317,129 @@
   };
   Chart.prototype.clearPriceLines = function () { this.priceLines = []; this._paint(); };
   Chart.prototype.onCrosshair = function (cb) { this.crosshairCb = cb; };
-  // Drawings live in (bar index, price) space so pan and zoom reproject them.
+  // ── Drawings ─────────────────────────────────────────────────────────
+  // The production widget's full set, ported (it is TradeRead code): trend,
+  // hline, rect, fib retracement, text; cursor selects, moves and resizes;
+  // Delete removes the selection; persistence is debounced and strips the
+  // cached text width, and a persist key makes saving per-symbol.
   Chart.prototype.setTool = function (t) { this.tool = t || null; this.el.style.cursor = t ? "crosshair" : ""; };
-  Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._paintDrawings(); };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
+  Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
+  Chart.prototype.deleteSelected = function () {
+    if (!this._selected) return;
+    var id = this._selected;
+    this.drawings = this.drawings.filter(function (d) { return d.id !== id; });
+    this._selected = null;
+    this._persist();
+    this._paintDrawings();
+  };
+  Chart.prototype.serializeDrawings = function () {
+    return JSON.stringify(this.drawings, function (k, v) { return k === "_tw" ? undefined : v; });
+  };
+  Chart.prototype.loadDrawings = function (json) {
+    try { this.drawings = (typeof json === "string" ? JSON.parse(json) : json) || []; } catch (e) { this.drawings = []; }
+    this._selected = null;
+    this._paintDrawings();
+  };
+  Chart.prototype.setPersistKey = function (key) {
+    this._persistKey = key || null;
+    if (key) {
+      try { this.loadDrawings(localStorage.getItem(key)); } catch (e) { this.loadDrawings([]); }
+    }
+  };
+  Chart.prototype._persist = function () {
+    var self = this;
+    if (!this._persistKey) return;
+    clearTimeout(this._saveT);
+    this._saveT = setTimeout(function () {
+      try { localStorage.setItem(self._persistKey, self.serializeDrawings()); } catch (e) {}
+    }, 300);
+  };
+
+  var FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+  var DRAW_COLOR = "#818cf8";
+
   Chart.prototype._paintDrawings = function () {
-    var c = this.dctx, W = this._plotW(), pp = this.panes[0];
+    var c = this.dctx, W = this._plotW(), pp = this.panes[0], self = this;
     c.clearRect(0, 0, this.w, this.h);
+    var dec = stepDecimals(niceStep(pp.max - pp.min, 8));
     var list = this._draft ? this.drawings.concat([this._draft]) : this.drawings;
     for (var k = 0; k < list.length; k++) {
       var d = list[k];
-      c.strokeStyle = "#6366f1"; c.lineWidth = 1.5;
+      var sel = d.id && d.id === this._selected;
+      c.strokeStyle = DRAW_COLOR;
+      c.fillStyle = DRAW_COLOR;
+      c.lineWidth = sel ? 2 : 1.4;
+      var x1 = isNum(d.t1) ? this.timeToX(d.t1) : null, y1 = isNum(d.p1) ? pp.toY(d.p1) : null;
+      var x2 = isNum(d.t2) ? this.timeToX(d.t2) : null, y2 = isNum(d.p2) ? pp.toY(d.p2) : null;
       if (d.type === "hline") {
-        var hy = pp.toY(d.p1);
-        if (hy < pp.y0 || hy > pp.y0 + pp.h) continue;
-        c.beginPath(); c.moveTo(0, Math.round(hy) + 0.5); c.lineTo(W, Math.round(hy) + 0.5); c.stroke();
+        if (y1 === null || y1 < pp.y0 || y1 > pp.y0 + pp.h) continue;
+        c.beginPath(); c.moveTo(0, Math.round(y1) + 0.5); c.lineTo(W, Math.round(y1) + 0.5); c.stroke();
       } else if (d.type === "trend") {
-        c.beginPath();
-        c.moveTo(this.indexToX(d.i1), pp.toY(d.p1));
-        c.lineTo(this.indexToX(d.i2), pp.toY(d.p2));
-        c.stroke();
+        c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+        if (sel) { c.fillRect(x1 - 3, y1 - 3, 6, 6); c.fillRect(x2 - 3, y2 - 3, 6, 6); }
       } else if (d.type === "rect") {
-        var x1 = this.indexToX(d.i1), x2 = this.indexToX(d.i2);
-        var y1 = pp.toY(d.p1), y2 = pp.toY(d.p2);
-        c.fillStyle = "rgba(99,102,241,0.12)";
+        c.save(); c.globalAlpha = 0.12;
         c.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        c.restore();
         c.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        if (sel) c.fillRect(x2 - 3, y2 - 3, 6, 6);
+      } else if (d.type === "fib") {
+        var xa = Math.min(x1, x2), xb = Math.max(x1, x2);
+        c.font = "10px -apple-system, sans-serif";
+        for (var f = 0; f < FIB_LEVELS.length; f++) {
+          var lv = FIB_LEVELS[f];
+          var price = d.p2 - (d.p2 - d.p1) * lv;
+          var fy = pp.toY(price);
+          c.globalAlpha = lv === 0 || lv === 1 ? 0.9 : 0.55;
+          c.beginPath(); c.moveTo(xa, Math.round(fy) + 0.5); c.lineTo(xb, Math.round(fy) + 0.5); c.stroke();
+          c.fillText(lv.toFixed(3) + "  " + fmtPrice(price, dec), xb + 5, fy + 3);
+          c.globalAlpha = 1;
+        }
+        if (sel) c.fillRect(x2 - 3, y2 - 3, 6, 6);
+      } else if (d.type === "text") {
+        var fs = d.size || 12;
+        c.font = "600 " + fs + "px -apple-system, sans-serif";
+        d._tw = c.measureText(d.text || "").width;   // cached for hit-testing, never persisted
+        c.fillText(d.text || "", x1, y1);
+        if (sel) {
+          c.save(); c.globalAlpha = 0.35;
+          c.strokeRect(x1 - 3, y1 - fs - 2, d._tw + 6, fs + 8);
+          c.restore();
+        }
       }
     }
+  };
+
+  function distToSeg(x, y, a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var len2 = dx * dx + dy * dy;
+    var t = len2 ? clamp(((x - a.x) * dx + (y - a.y) * dy) / len2, 0, 1) : 0;
+    var px = a.x + t * dx, py = a.y + t * dy;
+    return Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+  }
+
+  // Topmost hit wins (reverse order); a selected shape's handle beats its body.
+  Chart.prototype._hitTest = function (x, y) {
+    var pp = this.panes[0];
+    for (var k = this.drawings.length - 1; k >= 0; k--) {
+      var d = this.drawings[k];
+      var x1 = isNum(d.t1) ? this.timeToX(d.t1) : null, y1 = isNum(d.p1) ? pp.toY(d.p1) : null;
+      var x2 = isNum(d.t2) ? this.timeToX(d.t2) : null, y2 = isNum(d.p2) ? pp.toY(d.p2) : null;
+      if (d.id === this._selected && x2 !== null && Math.abs(x - x2) < 7 && Math.abs(y - y2) < 7 &&
+          (d.type === "rect" || d.type === "fib" || d.type === "trend")) return { d: d, handle: "p2" };
+      if (d.id === this._selected && d.type === "trend" && Math.abs(x - x1) < 7 && Math.abs(y - y1) < 7) return { d: d, handle: "p1" };
+      if (d.type === "hline") { if (Math.abs(y - y1) < 6) return { d: d, handle: null }; }
+      else if (d.type === "trend") { if (distToSeg(x, y, { x: x1, y: y1 }, { x: x2, y: y2 }) < 6) return { d: d, handle: null }; }
+      else if (d.type === "rect" || d.type === "fib") {
+        if (x >= Math.min(x1, x2) - 4 && x <= Math.max(x1, x2) + 4 &&
+            y >= Math.min(y1, y2) - 4 && y <= Math.max(y1, y2) + 4) return { d: d, handle: null };
+      } else if (d.type === "text") {
+        var fs = d.size || 12, tw = d._tw || (d.text || "").length * fs * 0.62;
+        if (x >= x1 - 4 && x <= x1 + tw + 4 && y >= y1 - fs - 4 && y <= y1 + 6) return { d: d, handle: null };
+      }
+    }
+    return null;
   };
   Chart.prototype.applyOptions = function (o) { Object.assign(this.opt, o || {}); this.el.style.background = this.opt.background; this._paint(); };
   Chart.prototype.scrollToRealtime = function () { this.rightIndex = this.bars.length - 1; this._paint(); };
@@ -539,8 +664,25 @@
       var r = el.getBoundingClientRect();
       self._cross = { x: e.clientX - r.left, y: e.clientY - r.top };
       if (self._draft) {
-        self._draft.i2 = self.xToIndex(self._cross.x);
+        self._draft.t2 = self.indexToTime(self.xToIndex(self._cross.x));
         self._draft.p2 = self.panes[0].toValue(self._cross.y);
+        self._paintDrawings();
+        self._paintCross();
+        return;
+      }
+      if (self._dragDraw) {
+        var dd = self._dragDraw, ppm = self.panes[0];
+        var tNow = self.indexToTime(self.xToIndex(self._cross.x)), vNow = ppm.toValue(self._cross.y);
+        if (dd.handle === "p2") { dd.d.t2 = tNow; dd.d.p2 = vNow; }
+        else if (dd.handle === "p1") { dd.d.t1 = tNow; dd.d.p1 = vNow; }
+        else {
+          var dt = tNow - dd.t0, dv = vNow - dd.v0;
+          dd.t0 = tNow; dd.v0 = vNow;
+          if (isNum(dd.d.t1)) dd.d.t1 += dt;
+          if (isNum(dd.d.t2)) dd.d.t2 += dt;
+          if (isNum(dd.d.p1)) dd.d.p1 += dv;
+          if (isNum(dd.d.p2)) dd.d.p2 += dv;
+        }
         self._paintDrawings();
         self._paintCross();
         return;
@@ -552,22 +694,47 @@
       } else self._paintCross();
     });
     el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._paintCross(); if (self.crosshairCb) self.crosshairCb(null); });
+    function newId() { return "d" + Math.round(performance.now() * 1000) + "_" + self.drawings.length; }
     el.addEventListener("mousedown", function (e) {
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left, y = e.clientY - r.top;
-      if (self.tool && self._paneAt(y) === self.panes[0]) {
-        var i0 = self.xToIndex(x), v0 = self.panes[0].toValue(y);
+      var pp = self.panes[0];
+      if (self.tool && self._paneAt(y) === pp) {
+        var t0 = self.indexToTime(self.xToIndex(x)), v0 = pp.toValue(y);
         if (self.tool === "hline") {
-          self.drawings.push({ type: "hline", p1: v0 });
+          self.drawings.push({ id: newId(), type: "hline", t1: t0, p1: v0 });
           self.setTool(null);
           if (self._toolDoneCb) self._toolDoneCb();
+          self._persist();
           self._paintDrawings();
+        } else if (self.tool === "text") {
+          var ask = self.opt.textPrompt || function (initial, cb) { cb(window.prompt("Text:", initial || "")); };
+          ask("", function (txt) {
+            if (txt) {
+              self.drawings.push({ id: newId(), type: "text", t1: t0, p1: v0, text: txt, size: 12 });
+              self._persist();
+              self._paintDrawings();
+            }
+          });
+          self.setTool(null);
+          if (self._toolDoneCb) self._toolDoneCb();
         } else {
-          self._draft = { type: self.tool, i1: i0, p1: v0, i2: i0, p2: v0 };
+          self._draft = { id: newId(), type: self.tool, t1: t0, p1: v0, t2: t0, p2: v0 };
         }
         e.preventDefault();
         return;
       }
+      // cursor: select, grab a handle, or start moving the whole shape
+      var hit = self._hitTest(x, y);
+      if (hit) {
+        self._selected = hit.d.id;
+        self._dragDraw = { d: hit.d, handle: hit.handle,
+          t0: self.indexToTime(self.xToIndex(x)), v0: pp.toValue(y) };
+        self._paintDrawings();
+        e.preventDefault();
+        return;
+      }
+      if (self._selected) { self._selected = null; self._paintDrawings(); }
       drag = { x0: x, right0: self.rightIndex };
       e.preventDefault();
     });
@@ -575,14 +742,35 @@
       drag = null;
       if (self._draft) {
         var f = self._draft;
-        if (f.i1 !== f.i2 || f.p1 !== f.p2) self.drawings.push(f);
+        if (f.t1 !== f.t2 || f.p1 !== f.p2) { self.drawings.push(f); self._selected = f.id; self._persist(); }
         self._draft = null;
         self.setTool(null);
         if (self._toolDoneCb) self._toolDoneCb();
         self._paintDrawings();
       }
+      if (self._dragDraw) { self._dragDraw = null; self._persist(); }
     });
-    el.addEventListener("dblclick", function () { self.scrollToRealtime(); });
+    // Delete removes the selection — but never while typing in a form field.
+    window.addEventListener("keydown", function (e) {
+      if ((e.key === "Delete" || e.key === "Backspace") && self._selected) {
+        var tag = (document.activeElement && document.activeElement.tagName) || "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        self.deleteSelected();
+      }
+    });
+    el.addEventListener("dblclick", function (e) {
+      var r = el.getBoundingClientRect();
+      var hit = self._hitTest(e.clientX - r.left, e.clientY - r.top);
+      if (hit && hit.d.type === "text") {
+        var ask = self.opt.textPrompt || function (initial, cb) { cb(window.prompt("Text:", initial || "")); };
+        ask(hit.d.text || "", function (txt) {
+          if (txt !== null && txt !== undefined && txt !== "") { hit.d.text = txt; self._persist(); self._paintDrawings(); }
+        });
+        return;
+      }
+      self.scrollToRealtime();
+    });
 
     el.addEventListener("wheel", function (e) {
       e.preventDefault();
@@ -648,7 +836,7 @@
   };
 
   global.TRCharts = {
-    version: "0.4.0",
+    version: "0.5.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
