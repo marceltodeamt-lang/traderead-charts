@@ -870,6 +870,37 @@
       (inf.title ? '<span style="color:' + o.textColor + ';font-weight:600;font-size:12px;">' + inf.title + "</span>" : "");
   };
 
+  // The indicator legend with LIVE numbers: label in the series color plus
+  // the value under the crosshair (or the last bar when the cursor is away).
+  Chart.prototype._paintLegend = function (barTime) {
+    if (!this.indicators.length) { if (this._legend) this._legend.innerHTML = ""; return; }
+    if (!this._legend) {
+      var lg = document.createElement("div");
+      lg.className = "trc-legend";
+      lg.style.cssText = "position:absolute;left:46px;top:34px;right:80px;z-index:4;display:flex;flex-wrap:wrap;gap:2px 12px;" +
+        "font:700 11px -apple-system,'Segoe UI',sans-serif;pointer-events:none;user-select:none;";
+      this.el.appendChild(lg);
+      this._legend = lg;
+    }
+    var t = barTime;
+    if (t === undefined || t === null) {
+      var n = this.bars.length;
+      t = n ? this.bars[n - 1].time : null;
+    }
+    var html = "";
+    for (var i = 0; i < this.indicators.length; i++) {
+      var ind = this.indicators[i], def = IND_DEFS[ind.kind];
+      var label = def.label + (ind.params.p ? " " + ind.params.p : ind.kind === "macd" ? " " + ind.params.f + "/" + ind.params.s + "/" + ind.params.sig : ind.kind === "stoch" ? " " + ind.params.k + "/" + ind.params.d + "/" + ind.params.s : "");
+      var val = "";
+      if (t !== null && ind._legendRef) {
+        var v = ind._legendRef.byTime.get(t);
+        if (isNum(v)) val = " " + fmtPrice(v, v >= 1000 ? 2 : v >= 10 ? 2 : 4);
+      }
+      html += '<span style="color:' + (ind.color || "#8b949e") + ';white-space:nowrap;">' + label + val + "</span>";
+    }
+    this._legend.innerHTML = html;
+  };
+
   Chart.prototype.setMarkers = function (list) {
     this.markers = (list || []).slice().sort(function (a, b) { return a.time - b.time; });
     this._paint();
@@ -941,9 +972,18 @@
         self.addGuide(pane, 20, "rgba(0,217,126,0.5)");
         pane++;
       }
+      // legend reference: the indicator's primary line, wherever it landed
+      var refKey = "@" + ind.id;
+      ind._legendRef = null;
+      for (var pi3 = 0; pi3 < self.panes.length; pi3++) {
+        if (self.panes[pi3].lines[refKey]) { ind._legendRef = self.panes[pi3].lines[refKey]; break; }
+        if (self.panes[pi3].lines[refKey + "m"]) { ind._legendRef = self.panes[pi3].lines[refKey + "m"]; break; }
+      }
     });
+    this._paintLegend(null);
     this._paint();
   };
+
 
   Chart.prototype.addPriceLine = function (price, color, label) {
     this.priceLines.push({ price: price, color: color || "#8b949e", label: label });
@@ -1324,6 +1364,26 @@
       }
       c.restore();
 
+      // last-value tags on the axis, one per oscillator line — the numbers
+      // the production widget shows at the scale (owner, 7 Sep 2026)
+      if (pn.kind === "osc") {
+        c.textBaseline = "middle";
+        for (id in pn.lines) {
+          var lnT = pn.lines[id];
+          var lastB = this.bars[hi];
+          var lastV = lastB ? lnT.byTime.get(lastB.time) : undefined;
+          if (!isNum(lastV)) continue;
+          var lyT = pn.toY(lastV);
+          if (lyT < pn.y0 + 2 || lyT > pn.y0 + pn.h - 2) continue;
+          var decT = stepDecimals(niceStep(pn.max - pn.min, 8));
+          var txtT = fmtPrice(lastV, decT);
+          c.fillStyle = lnT.color;
+          c.fillRect(W, lyT - 8, o.priceAxisWidth, 16);
+          c.fillStyle = "#0d1117";
+          c.font = o.font;
+          c.fillText(txtT, W + 5, lyT);
+        }
+      }
       // osc pane: right-axis labels for its own scale (top & bottom values)
       if (pn.kind === "osc") {
         var oStep = niceStep(pn.max - pn.min, Math.max(2, Math.round(pn.h / 45)));
@@ -1434,6 +1494,7 @@
       c.fillStyle = o.tagText;
       c.fillText(xt, clamp(bx - tw / 2, 0, W - tw) + 6, H + o.timeAxisHeight / 2 - 1);
     }
+    this._paintLegend(b ? b.time : null);
     if (this.crosshairCb) this.crosshairCb(b ? { bar: b, index: i, price: this.panes[0].toValue(y), paneValue: val } : null);
   };
 
@@ -1512,7 +1573,7 @@
         self._paint();
       } else self._paintCross();
     });
-    el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._paintCross(); if (self.crosshairCb) self.crosshairCb(null); });
+    el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._paintCross(); self._paintLegend(null); if (self.crosshairCb) self.crosshairCb(null); });
     function newId() { return "d" + Math.round(performance.now() * 1000) + "_" + self.drawings.length; }
     el.addEventListener("mousedown", function (e) {
       var r = el.getBoundingClientRect();
@@ -1792,7 +1853,7 @@
   };
 
   global.TRCharts = {
-    version: "0.12.0",
+    version: "0.13.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
