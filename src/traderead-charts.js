@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.8.0
+ * TradeRead Charts v0.9.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -139,7 +139,8 @@
     this._sepDrag = null;           // {i, y0, h0} while a pane separator is dragged
     this.indicators = [];           // built-in indicator list (see addIndicator)
     this._indColor = 0;
-    this.chartType = "candles";     // "candles" | "bars" | "line" | "area"
+    this.chartType = "candles";     // "candles" | "bars" | "line" | "area" | "baseline"
+    this.markers = [];              // {time, position:"above"|"below", shape, color, text}
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = 0;
     this.crosshairCb = null;
@@ -192,7 +193,13 @@
     line: SVGI('<path d="M2.5 11 L6 7 L9 9.5 L13.5 4"/>'),
     area: SVGI('<path d="M2.5 11 L6 7 L9 9.5 L13.5 4 V13 H2.5 Z" fill="currentColor" opacity="0.35" stroke="none"/><path d="M2.5 11 L6 7 L9 9.5 L13.5 4"/>'),
     baseline: SVGI('<line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="2 2"/><path d="M2.5 10.5 L6 5.5 L9 9 L13.5 4"/>'),
+    hollow: SVGI('<line x1="5" y1="2.5" x2="5" y2="13.5"/><rect x="3.4" y="5" width="3.2" height="5" rx="0.6"/><line x1="11" y1="2.5" x2="11" y2="13.5"/><rect x="9.4" y="4" width="3.2" height="6.5" fill="currentColor" stroke="none" rx="0.6"/>'),
+    heikin: SVGI('<rect x="2.8" y="6" width="3.4" height="6" rx="1.6"/><rect x="9.8" y="3.5" width="3.4" height="6" rx="1.6" fill="currentColor" stroke="none"/>'),
   };
+  var TYPE_LIST = [
+    ["candles", "Candles"], ["hollow", "Hollow candles"], ["heikin", "Heikin Ashi"],
+    ["bars", "OHLC bars"], ["line", "Line"], ["area", "Area"], ["baseline", "Baseline"],
+  ];
 
   Chart.prototype._mountUI = function () {
     var self = this, o = this.opt;
@@ -226,16 +233,39 @@
     sep.style.cssText = "height:1px;background:" + o.separatorColor + ";margin:3px 2px;";
     rail.appendChild(sep);
     btn(ICONS.ind, "Indicators", function () { self._toggleIndPanel(); });
-    var TYPES = ["candles", "bars", "line", "area", "baseline"];
-    btn(ICONS.candles, "Chart type", function (b) {
-      var next = TYPES[(TYPES.indexOf(self.chartType) + 1) % TYPES.length];
-      self.setChartType(next);
-      b.innerHTML = ICONS[next];
-      b.title = "Chart type: " + next;
-    });
+    var typeBtn = btn(ICONS.candles, "Chart type", function () { self._toggleTypeMenu(typeBtn); });
+    this._typeBtn = typeBtn;
     btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
     this.el.appendChild(rail);
     this._rail = rail;
+  };
+
+  // A picker list, not a blind cycle: seven types, current one checked.
+  Chart.prototype._toggleTypeMenu = function (anchorBtn) {
+    var self = this, o = this.opt;
+    if (this._typeMenu) { this._typeMenu.remove(); this._typeMenu = null; return; }
+    var m = document.createElement("div");
+    m.className = "trc-type-menu";
+    m.style.cssText = "position:absolute;left:44px;top:" + (anchorBtn ? anchorBtn.offsetTop + 4 : 40) + "px;z-index:8;" +
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:12px;padding:6px;" +
+      "color:" + o.textColor + ";font:12px -apple-system,'Segoe UI',sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.35);";
+    TYPE_LIST.forEach(function (t) {
+      var row = document.createElement("button");
+      row.type = "button";
+      row.style.cssText = "display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:none;" +
+        "background:" + (self.chartType === t[0] ? "rgba(99,102,241,0.25)" : "none") + ";color:inherit;font:inherit;" +
+        "border-radius:8px;padding:6px 10px;cursor:pointer;white-space:nowrap;";
+      row.innerHTML = ICONS[t[0]] + "<span>" + t[1] + "</span>";
+      row.addEventListener("click", function () {
+        self.setChartType(t[0]);
+        if (self._typeBtn) { self._typeBtn.innerHTML = ICONS[t[0]]; self._typeBtn.title = "Chart type: " + t[1]; }
+        m.remove();
+        self._typeMenu = null;
+      });
+      m.appendChild(row);
+    });
+    this.el.appendChild(m);
+    this._typeMenu = m;
   };
 
   Chart.prototype._toggleIndPanel = function () {
@@ -286,17 +316,59 @@
     this._indPanel = p;
   };
 
-  // PNG export: every layer composited, on the chart's own background.
+  // PNG snapshot. Nothing downloads by itself (owner, 7 Sep 2026): the
+  // camera opens a preview with explicit Download / Copy / Close actions.
   Chart.prototype.snapshot = function (filename) {
+    var self = this, o = this.opt;
     var out = document.createElement("canvas");
     out.width = this.canvas.width; out.height = this.canvas.height;
     var c = out.getContext("2d");
+    c.fillStyle = o.background;
+    c.fillRect(0, 0, out.width, out.height);
     c.drawImage(this.canvas, 0, 0);
     c.drawImage(this.drawCanvas, 0, 0);
-    var a = document.createElement("a");
-    a.download = filename || "traderead-chart.png";
-    a.href = out.toDataURL("image/png");
-    a.click();
+    if (this._snapModal) this._snapModal.remove();
+    var wrap = document.createElement("div");
+    wrap.className = "trc-snap";
+    wrap.style.cssText = "position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;" +
+      "background:rgba(0,0,0,0.55);";
+    var box = document.createElement("div");
+    box.style.cssText = "max-width:86%;max-height:86%;display:flex;flex-direction:column;gap:10px;" +
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:14px;padding:12px;";
+    var img = document.createElement("img");
+    img.src = out.toDataURL("image/png");
+    img.style.cssText = "max-width:100%;max-height:60vh;border-radius:8px;display:block;";
+    var row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
+    function act(label, fn) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = label;
+      b.style.cssText = "border:1px solid " + o.separatorColor + ";background:none;color:" + o.tagText + ";" +
+        "font:700 12px -apple-system,'Segoe UI',sans-serif;border-radius:8px;padding:7px 14px;cursor:pointer;";
+      b.addEventListener("click", fn);
+      row.appendChild(b);
+      return b;
+    }
+    act("Download", function () {
+      var a = document.createElement("a");
+      a.download = filename || "traderead-chart.png";
+      a.href = img.src;
+      a.click();
+    });
+    if (navigator.clipboard && window.ClipboardItem) {
+      var copyBtn = act("Copy", function () {
+        out.toBlob(function (blob) {
+          navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+            .then(function () { copyBtn.textContent = "Copied ✓"; setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500); })
+            .catch(function () { copyBtn.textContent = "Copy failed"; });
+        });
+      });
+    }
+    act("Close", function () { wrap.remove(); self._snapModal = null; });
+    wrap.addEventListener("click", function (e) { if (e.target === wrap) { wrap.remove(); self._snapModal = null; } });
+    box.appendChild(img); box.appendChild(row); wrap.appendChild(box);
+    this.el.appendChild(wrap);
+    this._snapModal = wrap;
   };
 
   Chart.prototype._mountLogo = function () {
@@ -414,6 +486,7 @@
     // day-marks with clock times, daily and up never shows a clock.
     var n = this.bars.length;
     this._barSec = n > 1 ? Math.max(1, Math.round((this.bars[n - 1].time - this.bars[0].time) / (n - 1))) : 3600;
+    this._ha = null;
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
   };
@@ -425,6 +498,7 @@
       this.bars.push(bar);
       if (atRight) this.rightIndex = this.bars.length - 1;
     }
+    this._ha = null;
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
   };
@@ -606,8 +680,28 @@
     this._persistInd();
   };
   Chart.prototype.getIndicators = function () { return this.indicators.slice(); };
+  // Per-bar markers: entries, exits, signals. Sorted once; drawn above the
+  // bar's high or below its low with a small gap that scales with spacing.
+  Chart.prototype.setMarkers = function (list) {
+    this.markers = (list || []).slice().sort(function (a, b) { return a.time - b.time; });
+    this._paint();
+  };
+  Chart.prototype._heikin = function () {
+    if (this._ha) return this._ha;
+    var out = [], po = null, pc = null;
+    for (var i = 0; i < this.bars.length; i++) {
+      var b = this.bars[i];
+      var hc = (b.open + b.high + b.low + b.close) / 4;
+      var ho = po === null ? (b.open + b.close) / 2 : (po + pc) / 2;
+      out.push({ time: b.time, open: ho, close: hc,
+        high: Math.max(b.high, ho, hc), low: Math.min(b.low, ho, hc), volume: b.volume });
+      po = ho; pc = hc;
+    }
+    this._ha = out;
+    return out;
+  };
   Chart.prototype.setChartType = function (t) {
-    if (["candles", "bars", "line", "area", "baseline"].indexOf(t) < 0) return;
+    if (["candles", "hollow", "heikin", "bars", "line", "area", "baseline"].indexOf(t) < 0) return;
     this.chartType = t;
     this._paint();
   };
@@ -962,8 +1056,10 @@
         c.stroke();
       }
     } else {
+      var hollow = ct === "hollow";
+      var src = ct === "heikin" ? this._heikin() : this.bars;
       for (i = lo; i <= hi; i++) {
-        b = this.bars[i]; if (!b) continue;
+        b = src[i]; if (!b) continue;
         var cx = this.indexToX(i);
         if (cx < -this.barSpacing || cx > W + this.barSpacing) continue;
         var up = b.close >= b.open;
@@ -972,8 +1068,14 @@
         c.strokeStyle = up ? o.wickUp : o.wickDown;
         c.lineWidth = 1;
         c.beginPath(); c.moveTo(Math.round(cx) + 0.5, yH); c.lineTo(Math.round(cx) + 0.5, yL); c.stroke();
-        c.fillStyle = up ? o.upColor : o.downColor;
-        c.fillRect(cx - half, Math.min(yO, yC), half * 2, Math.max(1, Math.abs(yC - yO)));
+        var bodyY = Math.min(yO, yC), bodyH = Math.max(1, Math.abs(yC - yO));
+        if (hollow && up) {
+          c.strokeStyle = o.upColor;
+          c.strokeRect(cx - half + 0.5, bodyY + 0.5, half * 2 - 1, bodyH);
+        } else {
+          c.fillStyle = up ? o.upColor : o.downColor;
+          c.fillRect(cx - half, bodyY, half * 2, bodyH);
+        }
       }
     }
 
@@ -1057,6 +1159,38 @@
       c.fillText(txt, W + 5, ty);
     }
 
+    // markers
+    if (this.markers.length) {
+      c.save();
+      c.beginPath(); c.rect(0, pp.y0, W, pp.h); c.clip();
+      var msz = clamp(this.barSpacing * 0.5, 4, 9);
+      c.font = "700 10px -apple-system, sans-serif";
+      for (i = 0; i < this.markers.length; i++) {
+        var mk = this.markers[i];
+        var mi = Math.round(this.timeToIndex(mk.time));
+        b = this.bars[mi];
+        if (!b || mi < lo || mi > hi) continue;
+        var mx2 = this.indexToX(mi);
+        var above = mk.position !== "below";
+        var my2 = above ? pp.toY(b.high) - 7 : pp.toY(b.low) + 7;
+        c.fillStyle = mk.color || (above ? o.downColor : o.upColor);
+        c.beginPath();
+        if (mk.shape === "circle") {
+          c.arc(mx2, my2, msz * 0.55, 0, Math.PI * 2);
+        } else if (above) {           // arrow pointing down at the bar
+          c.moveTo(mx2, my2); c.lineTo(mx2 - msz * 0.6, my2 - msz); c.lineTo(mx2 + msz * 0.6, my2 - msz);
+        } else {                      // arrow pointing up at the bar
+          c.moveTo(mx2, my2); c.lineTo(mx2 - msz * 0.6, my2 + msz); c.lineTo(mx2 + msz * 0.6, my2 + msz);
+        }
+        c.closePath(); c.fill();
+        if (mk.text) {
+          var mtw = c.measureText(mk.text).width;
+          c.fillText(mk.text, mx2 - mtw / 2, above ? my2 - msz - 4 : my2 + msz + 12);
+        }
+      }
+      c.restore();
+    }
+
     c.strokeStyle = o.gridColor;
     c.beginPath(); c.moveTo(W + 0.5, 0); c.lineTo(W + 0.5, this.h); c.stroke();
     c.beginPath(); c.moveTo(0, H + 0.5); c.lineTo(this.w, H + 0.5); c.stroke();
@@ -1105,6 +1239,24 @@
   Chart.prototype._bind = function () {
     var self = this, el = this.overlay;
     var drag = null, pinch = null;
+    // Momentum: the pan keeps gliding after release, decaying each frame —
+    // the "thrown" feel every charting tool has. Any new input kills it.
+    var glide = { v: 0, raf: 0, lastX: 0, lastT: 0 };
+    function stopGlide() { if (glide.raf) cancelAnimationFrame(glide.raf); glide.raf = 0; glide.v = 0; }
+    function startGlide() {
+      if (Math.abs(glide.v) < 0.05) return;
+      var last = performance.now();
+      function step(now) {
+        var dt = now - last; last = now;
+        self.rightIndex = clamp(self.rightIndex - glide.v * dt / self.barSpacing,
+          0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        self._paint();
+        glide.v *= Math.pow(0.94, dt / 16.7);
+        if (Math.abs(glide.v) >= 0.05) glide.raf = requestAnimationFrame(step);
+        else glide.raf = 0;
+      }
+      glide.raf = requestAnimationFrame(step);
+    }
 
     el.addEventListener("mousemove", function (e) {
       var r = el.getBoundingClientRect();
@@ -1144,7 +1296,13 @@
         return;
       }
       if (drag) {
-        self.rightIndex = drag.right0 + (drag.x0 - (e.clientX - r.left)) / self.barSpacing;
+        var nowT = performance.now(), nowX = e.clientX - r.left;
+        if (glide.lastT) {
+          var inst = (nowX - glide.lastX) / Math.max(1, nowT - glide.lastT);
+          glide.v = glide.v * 0.75 + inst * 0.25;     // smoothed px/ms
+        }
+        glide.lastX = nowX; glide.lastT = nowT;
+        self.rightIndex = drag.right0 + (drag.x0 - nowX) / self.barSpacing;
         self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
         self._paint();
       } else self._paintCross();
@@ -1198,10 +1356,13 @@
         return;
       }
       if (self._selected) { self._selected = null; self._paintDrawings(); }
+      stopGlide();
+      glide.lastX = x; glide.lastT = 0;
       drag = { x0: x, right0: self.rightIndex };
       e.preventDefault();
     });
     window.addEventListener("mouseup", function () {
+      if (drag) startGlide();
       drag = null;
       if (self._draft) {
         var f = self._draft;
@@ -1238,6 +1399,7 @@
 
     el.addEventListener("wheel", function (e) {
       e.preventDefault();
+      stopGlide();
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left;
       // A Mac trackpad swipes horizontally with deltaX: that is a PAN, the
@@ -1290,6 +1452,8 @@
           self._paintDrawings();
           return;
         }
+        stopGlide();
+        glide.lastX = tx; glide.lastT = 0;
         drag = { x0: tx, right0: self.rightIndex };
       } else if (e.touches.length === 2) {
         // a second finger means navigation: commit whatever was in flight
@@ -1336,7 +1500,13 @@
         self.barSpacing = clamp(pinch.spacing0 * d / pinch.d0, self.opt.minBarSpacing, self.opt.maxBarSpacing);
         self._paint();
       } else if (drag && e.touches.length === 1) {
-        self.rightIndex = drag.right0 + (drag.x0 - (e.touches[0].clientX - r.left)) / self.barSpacing;
+        var tNowT = performance.now(), tNowX = e.touches[0].clientX - r.left;
+        if (glide.lastT) {
+          var tInst = (tNowX - glide.lastX) / Math.max(1, tNowT - glide.lastT);
+          glide.v = glide.v * 0.75 + tInst * 0.25;
+        }
+        glide.lastX = tNowX; glide.lastT = tNowT;
+        self.rightIndex = drag.right0 + (drag.x0 - tNowX) / self.barSpacing;
         self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
         self._paint();
         e.preventDefault();
@@ -1344,6 +1514,7 @@
     }, { passive: false });
     function endTouch(e) {
       if (e.touches.length) return;
+      if (drag) startGlide();
       drag = null; pinch = null;
       if (self._draft) {
         var f = self._draft;
@@ -1382,7 +1553,7 @@
   };
 
   global.TRCharts = {
-    version: "0.8.0",
+    version: "0.9.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };

@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.8.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.9.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -25,8 +25,8 @@ fires while a form field has focus.
 `ui: true` (the default) mounts the complete widget, not just a canvas:
 the drawing rail, a TradingView-style indicator panel (any number of
 EMAs/SMAs, VWAP, Bollinger, RSI, MACD, Stochastic — add, remove, edit
-params, all persisted per key), a chart-type switcher (candles, OHLC
-bars, line, area, baseline) and a one-click PNG snapshot. Hosts that want only the
+params, all persisted per key), a chart-type menu (seven types,
+Heikin Ashi included) and a PNG snapshot that opens a preview with explicit Download / Copy actions — nothing downloads by itself. Hosts that want only the
 engine pass `ui: false` and drive the same APIs themselves.
 
 ## Quick start
@@ -47,9 +47,10 @@ engine pass `ui: false` and drive the same APIs themselves.
 - [x] Drawing set with selection, move, resize, persistence
 - [x] Light theme palette
 - [x] Draggable pane separators (mouse and touch)
-- [x] Chart types: candles, OHLC bars, line, area, baseline
-- [ ] Markers, per-bar coloring API
-- [ ] Kinetic scroll feel tuning; pinch anchor refinement
+- [x] Chart types, picked from a menu: candles, hollow candles, Heikin Ashi, OHLC bars, line, area, baseline
+- [x] Markers (arrows/circles with text, above/below bars)
+- [ ] Per-bar coloring API
+- [x] Kinetic scroll (momentum glide with decay); pinch anchor refinement pending
 - [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates
 
 ## License
