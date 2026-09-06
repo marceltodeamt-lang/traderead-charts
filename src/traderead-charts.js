@@ -650,13 +650,22 @@
   Chart.prototype.yToPrice = function (y) { return this.panes[0].toValue(y); };
 
   // ── Data API ─────────────────────────────────────────────────────────
+  // An explicit bar length beats the inferred one wherever sessions have
+  // gaps (stocks after a weekend). "1M"/"1Y" pass their calendar strings.
+  Chart.prototype.setTimeframe = function (spec) {
+    this._tfSpec = spec;
+    if (typeof spec === "number") this._barSecFixed = spec;
+    else if (spec === "1M") this._barSecFixed = 2629800;
+    else if (spec === "1Y") this._barSecFixed = 31557600;
+    else this._barSecFixed = null;
+  };
   Chart.prototype.setData = function (bars) {
     this.bars = (bars || []).slice().sort(function (a, b) { return a.time - b.time; });
     this.rightIndex = this.bars.length - 1;
     // The label alphabet depends on the bar size: intraday alternates
     // day-marks with clock times, daily and up never shows a clock.
     var n = this.bars.length;
-    this._barSec = n > 1 ? Math.max(1, Math.round((this.bars[n - 1].time - this.bars[0].time) / (n - 1))) : 3600;
+    this._barSec = this._barSecFixed || (n > 1 ? Math.max(1, Math.round((this.bars[n - 1].time - this.bars[0].time) / (n - 1))) : 3600);
     this._ha = null;
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
@@ -1058,6 +1067,23 @@
   };
   Chart.prototype.clearPriceLines = function () { this.priceLines = []; this._paint(); };
   Chart.prototype.onCrosshair = function (cb) { this.crosshairCb = cb; };
+  // cb({firstVisible, lastVisible, barsLeft}) after every pan/zoom; fires at
+  // most once per paint. barsLeft small = time to prepend history.
+  Chart.prototype.onVisibleRangeChange = function (cb) { this._rangeCb = cb; };
+  // Older bars arrive in front; the visible frame must not move. Drawings
+  // and markers anchor to TIME, so only rightIndex needs the shift — the
+  // exact bug class the production lazy-loader taught us.
+  Chart.prototype.prependBars = function (older) {
+    if (!older || !older.length) return;
+    var cut = this.bars.length ? this.bars[0].time : Infinity;
+    var add = older.filter(function (b) { return b.time < cut; }).sort(function (a, b) { return a.time - b.time; });
+    if (!add.length) return;
+    this.bars = add.concat(this.bars);
+    this.rightIndex += add.length;
+    this._ha = null;
+    if (this.indicators.length) this._applyIndicators();
+    else this._paint();
+  };
   // ── Drawings ─────────────────────────────────────────────────────────
   // The production widget's full set, ported (it is TradeRead code): trend,
   // hline, rect, fib retracement, text; cursor selects, moves and resizes;
@@ -1604,6 +1630,10 @@
 
     this._paintDrawings();
     this._paintCross();
+    if (this._rangeCb) {
+      var vr = this._visibleRange();
+      this._rangeCb({ firstVisible: vr[0], lastVisible: vr[1], barsLeft: vr[0] });
+    }
   };
 
   Chart.prototype._paintCross = function () {
@@ -2031,7 +2061,7 @@
   }
 
   global.TRCharts = {
-    version: "0.18.0",
+    version: "0.19.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
