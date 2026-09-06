@@ -256,7 +256,7 @@
     fsBtn.type = "button"; fsBtn.title = "Fullscreen"; fsBtn.innerHTML = fsIcon;
     // visibly a button, not axis furniture (owner: nobody would find the
     // faint one): accent tint, larger hit area, brightens on hover
-    fsBtn.style.cssText = "position:absolute;right:10px;bottom:" + (o.timeAxisHeight + 10) + "px;z-index:6;" +
+    fsBtn.style.cssText = "position:absolute;right:" + (o.priceAxisWidth + 10) + "px;bottom:" + (o.timeAxisHeight + 10) + "px;z-index:6;" +
       "width:34px;height:34px;border:1px solid rgba(129,140,248,0.55);border-radius:10px;" +
       "background:rgba(99,102,241,0.22);color:" + o.tagText + ";cursor:pointer;" +
       "display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.25);";
