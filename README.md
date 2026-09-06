@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.5.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.6.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -37,11 +37,11 @@ fires while a form field has focus.
 - [x] Sub-panes (RSI / MACD / Stochastic)
 - [x] Drawing set with selection, move, resize, persistence
 - [x] Light theme palette
-- [ ] Draggable pane separators
+- [x] Draggable pane separators (mouse and touch)
 - [ ] Area/baseline/bar series types
 - [ ] Markers, per-bar coloring API
 - [ ] Kinetic scroll feel tuning; pinch anchor refinement
-- [ ] Mobile drawing hardening (pointer capture + touch lock, as in production)
+- [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates
 
 ## License
 Free for commercial and personal use under the TradeRead Community

@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.5.0
+ * TradeRead Charts v0.6.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -135,6 +135,7 @@
     this._dragDraw = null;          // {d, handle:"p2"|null, t0, v0, orig}
     this._persistKey = null;
     this._saveT = null;
+    this._sepDrag = null;           // {i, y0, h0} while a pane separator is dragged
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = 0;
     this.crosshairCb = null;
@@ -164,11 +165,16 @@
   }
 
   Chart.prototype._mountLogo = function () {
-    var d = document.createElement("div");
+    // The mark is a LINK to traderead.ai — that is the licence's attribution
+    // in its working form, so it stays clickable (owner, 7 Sep 2026).
+    var d = document.createElement("a");
     d.className = "trc-logo";
+    d.href = "https://traderead.ai/";
+    d.target = "_blank";
+    d.rel = "noopener";
     d.style.cssText = "position:absolute;left:8px;bottom:" + (this.opt.timeAxisHeight + 8) +
       "px;z-index:3;display:flex;align-items:center;gap:7px;font:800 13.5px -apple-system,'Segoe UI',sans-serif;" +
-      "color:rgba(139,148,158,0.78);pointer-events:none;user-select:none;";
+      "color:rgba(139,148,158,0.78);text-decoration:none;cursor:pointer;user-select:none;";
     d.innerHTML = '<svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<line x1="5" y1="3" x2="5" y2="7" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><rect x="2.5" y="7" width="5" height="8" rx="1" fill="#ef4444"/>' +
       '<line x1="5" y1="15" x2="5" y2="20" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><line x1="14" y1="2" x2="14" y2="6" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>' +
@@ -212,6 +218,13 @@
       this.panes[i].h = Math.round(this.panes[i].hPx * scale);
       y += this.panes[i].h;
     }
+  };
+  // ±4px around an oscillator pane's top edge grabs the separator.
+  Chart.prototype._separatorAt = function (y) {
+    for (var i = 1; i < this.panes.length; i++) {
+      if (Math.abs(y - this.panes[i].y0) <= 4) return i;
+    }
+    return null;
   };
   Chart.prototype._paneAt = function (y) {
     for (var i = 0; i < this.panes.length; i++) {
@@ -322,7 +335,17 @@
   // hline, rect, fib retracement, text; cursor selects, moves and resizes;
   // Delete removes the selection; persistence is debounced and strips the
   // cached text width, and a persist key makes saving per-symbol.
-  Chart.prototype.setTool = function (t) { this.tool = t || null; this.el.style.cursor = t ? "crosshair" : ""; };
+  Chart.prototype.setTool = function (t) {
+    this.tool = t || null;
+    this.el.style.cursor = t ? "crosshair" : "";
+    this._touchLock();
+  };
+  // While a tool is armed or a shape is being dragged, the chart owns the
+  // touch: without touch-action none the browser steals the gesture, fires
+  // a cancel and kills the line mid-draw (paid for once in production).
+  Chart.prototype._touchLock = function () {
+    this.overlay.style.touchAction = (this.tool || this._draft || this._dragDraw || this._sepDrag) ? "none" : "";
+  };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
   Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
   Chart.prototype.deleteSelected = function () {
@@ -670,6 +693,16 @@
         self._paintCross();
         return;
       }
+      if (self._sepDrag) {
+        var sd = self._sepDrag;
+        // dragging DOWN moves the pane's top edge down = the pane shrinks
+        self.panes[sd.i].hPx = clamp(sd.h0 - (self._cross.y - sd.y0), 42, self._plotH() * 0.6);
+        self._paint();
+        return;
+      }
+      if (!self.tool && !drag && !self._draft && !self._dragDraw) {
+        el.style.cursor = self._separatorAt(self._cross.y) !== null ? "ns-resize" : "";
+      }
       if (self._dragDraw) {
         var dd = self._dragDraw, ppm = self.panes[0];
         var tNow = self.indexToTime(self.xToIndex(self._cross.x)), vNow = ppm.toValue(self._cross.y);
@@ -724,6 +757,13 @@
         e.preventDefault();
         return;
       }
+      // separator drag: resize the oscillator pane under it
+      var sep = self._separatorAt(y);
+      if (sep !== null) {
+        self._sepDrag = { i: sep, y0: y, h0: self.panes[sep].hPx };
+        e.preventDefault();
+        return;
+      }
       // cursor: select, grab a handle, or start moving the whole shape
       var hit = self._hitTest(x, y);
       if (hit) {
@@ -749,6 +789,7 @@
         self._paintDrawings();
       }
       if (self._dragDraw) { self._dragDraw = null; self._persist(); }
+      self._sepDrag = null;
     });
     // Delete removes the selection — but never while typing in a form field.
     window.addEventListener("keydown", function (e) {
@@ -793,15 +834,80 @@
 
     el.addEventListener("touchstart", function (e) {
       var r = el.getBoundingClientRect();
-      if (e.touches.length === 1) drag = { x0: e.touches[0].clientX - r.left, right0: self.rightIndex };
-      else if (e.touches.length === 2) {
-        drag = null;
+      if (e.touches.length === 1) {
+        var tx = e.touches[0].clientX - r.left, ty = e.touches[0].clientY - r.top;
+        var pp = self.panes[0];
+        if (self.tool && self._paneAt(ty) === pp) {
+          var t0 = self.indexToTime(self.xToIndex(tx)), v0 = pp.toValue(ty);
+          if (self.tool === "hline") {
+            self.drawings.push({ id: "d" + Math.round(performance.now() * 1000), type: "hline", t1: t0, p1: v0 });
+            self.setTool(null);
+            if (self._toolDoneCb) self._toolDoneCb();
+            self._persist(); self._paintDrawings();
+          } else if (self.tool === "text") {
+            var ask = self.opt.textPrompt || function (initial, cb) { cb(window.prompt("Text:", initial || "")); };
+            ask("", function (txt) {
+              if (txt) { self.drawings.push({ id: "d" + Math.round(performance.now() * 1000), type: "text", t1: t0, p1: v0, text: txt, size: 12 }); self._persist(); self._paintDrawings(); }
+            });
+            self.setTool(null);
+            if (self._toolDoneCb) self._toolDoneCb();
+          } else {
+            self._draft = { id: "d" + Math.round(performance.now() * 1000), type: self.tool, t1: t0, p1: v0, t2: t0, p2: v0 };
+            self._touchLock();
+          }
+          return;
+        }
+        var sep = self._separatorAt(ty);
+        if (sep !== null) { self._sepDrag = { i: sep, y0: ty, h0: self.panes[sep].hPx }; self._touchLock(); return; }
+        var hit = self._hitTest(tx, ty);
+        if (hit) {
+          self._selected = hit.d.id;
+          self._dragDraw = { d: hit.d, handle: hit.handle, t0: self.indexToTime(self.xToIndex(tx)), v0: pp.toValue(ty) };
+          self._touchLock();
+          self._paintDrawings();
+          return;
+        }
+        drag = { x0: tx, right0: self.rightIndex };
+      } else if (e.touches.length === 2) {
+        // a second finger means navigation: commit whatever was in flight
+        if (self._draft) { self.drawings.push(self._draft); self._selected = self._draft.id; self._draft = null; self._persist(); self._paintDrawings(); }
+        self._dragDraw = null; self._sepDrag = null; drag = null;
+        self._touchLock();
         var dx = e.touches[0].clientX - e.touches[1].clientX;
         pinch = { d0: Math.abs(dx) || 1, spacing0: self.barSpacing };
       }
     }, { passive: true });
     el.addEventListener("touchmove", function (e) {
       var r = el.getBoundingClientRect();
+      if (e.touches.length === 1 && (self._draft || self._dragDraw || self._sepDrag)) {
+        var tx = e.touches[0].clientX - r.left, ty = e.touches[0].clientY - r.top;
+        var pp = self.panes[0];
+        if (self._draft) {
+          self._draft.t2 = self.indexToTime(self.xToIndex(tx));
+          self._draft.p2 = pp.toValue(ty);
+          self._paintDrawings();
+        } else if (self._sepDrag) {
+          var sd = self._sepDrag;
+          self.panes[sd.i].hPx = clamp(sd.h0 - (ty - sd.y0), 42, self._plotH() * 0.6);
+          self._paint();
+        } else {
+          var dd = self._dragDraw;
+          var tNow = self.indexToTime(self.xToIndex(tx)), vNow = pp.toValue(ty);
+          if (dd.handle === "p2") { dd.d.t2 = tNow; dd.d.p2 = vNow; }
+          else if (dd.handle === "p1") { dd.d.t1 = tNow; dd.d.p1 = vNow; }
+          else {
+            var dt = tNow - dd.t0, dv = vNow - dd.v0;
+            dd.t0 = tNow; dd.v0 = vNow;
+            if (isNum(dd.d.t1)) dd.d.t1 += dt;
+            if (isNum(dd.d.t2)) dd.d.t2 += dt;
+            if (isNum(dd.d.p1)) dd.d.p1 += dv;
+            if (isNum(dd.d.p2)) dd.d.p2 += dv;
+          }
+          self._paintDrawings();
+        }
+        e.preventDefault();
+        return;
+      }
       if (pinch && e.touches.length === 2) {
         var d = Math.abs(e.touches[0].clientX - e.touches[1].clientX) || 1;
         self.barSpacing = clamp(pinch.spacing0 * d / pinch.d0, self.opt.minBarSpacing, self.opt.maxBarSpacing);
@@ -813,7 +919,24 @@
         e.preventDefault();
       }
     }, { passive: false });
-    el.addEventListener("touchend", function (e) { if (!e.touches.length) { drag = null; pinch = null; } }, { passive: true });
+    function endTouch(e) {
+      if (e.touches.length) return;
+      drag = null; pinch = null;
+      if (self._draft) {
+        var f = self._draft;
+        if (f.t1 !== f.t2 || f.p1 !== f.p2) { self.drawings.push(f); self._selected = f.id; self._persist(); }
+        self._draft = null;
+        self.setTool(null);
+        if (self._toolDoneCb) self._toolDoneCb();
+        self._paintDrawings();
+      }
+      if (self._dragDraw) { self._dragDraw = null; self._persist(); }
+      self._sepDrag = null;
+      self._touchLock();
+    }
+    el.addEventListener("touchend", endTouch, { passive: true });
+    // a browser-fired cancel must COMMIT the in-flight shape, not destroy it
+    el.addEventListener("touchcancel", endTouch, { passive: true });
   };
 
   // Ready-made palettes; pass one to createChart or applyOptions. Colors are
@@ -836,7 +959,7 @@
   };
 
   global.TRCharts = {
-    version: "0.5.0",
+    version: "0.6.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
