@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.1.0
+ * TradeRead Charts v0.2.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -7,11 +7,11 @@
 (function (global) {
   "use strict";
 
-  // ── Defaults ──────────────────────────────────────────────────────────
   var DEFAULTS = {
     background: "#0d1117",
     textColor: "#8b949e",
     gridColor: "rgba(139,148,158,0.12)",
+    separatorColor: "rgba(139,148,158,0.25)",
     upColor: "#00d97e",
     downColor: "#f85149",
     wickUp: "#00d97e",
@@ -19,26 +19,25 @@
     volumeUp: "rgba(0,217,126,0.35)",
     volumeDown: "rgba(248,81,73,0.35)",
     crosshair: "rgba(139,148,158,0.45)",
-    axisBg: "#0d1117",
     tagBg: "#2a2e39",
     tagText: "#e6edf3",
     font: "11px -apple-system, 'Segoe UI', system-ui, sans-serif",
     priceAxisWidth: 64,
     timeAxisHeight: 24,
-    barSpacing: 8,          // px per bar at start
+    barSpacing: 8,
     minBarSpacing: 1.5,
     maxBarSpacing: 60,
-    rightPadBars: 5,        // empty bars kept right of the last candle
-    volumeHeightPct: 0.18,  // bottom slice of the pane for volume
+    rightPadBars: 5,
+    volumeHeightPct: 0.18,
     autoScalePadPct: 0.08,
-    logo: true,             // the TradeRead mark (see LICENSE.md)
+    oscPaneHeight: 110,       // default px height of an oscillator pane
+    minPricePaneFrac: 0.45,   // price pane never shrinks below this share
+    logo: true,
   };
 
-  // ── Small helpers ─────────────────────────────────────────────────────
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
   function isNum(v) { return typeof v === "number" && isFinite(v); }
 
-  // A pleasant tick step: 1, 2, 2.5, 5 × 10^k covering `span` in ~n steps.
   function niceStep(span, n) {
     var raw = span / Math.max(1, n);
     var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
@@ -46,34 +45,90 @@
     var step = norm >= 5 ? 10 : norm >= 2.5 ? 5 : norm >= 2 ? 2.5 : norm >= 1 ? 2 : 1;
     return step * mag;
   }
-
-  // Decimal places that make `step` read cleanly (0.00025 → 5, 250 → 0).
   function stepDecimals(step) {
     if (step >= 1) return step % 1 === 0 ? 0 : 2;
     var d = 0, s = step;
     while (s < 1 && d < 10) { s *= 10; d++; }
     return d + (Math.round(s) !== s ? 1 : 0);
   }
-
   function fmtPrice(v, dec) {
+    if (Math.abs(v) < Math.pow(10, -(dec + 3))) v = 0;   // float dust must not read "-0"
     return v.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
   }
-
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 
-  // ── Chart ─────────────────────────────────────────────────────────────
+  // A pane owns a horizontal slice of the plot and its own value scale.
+  // Pane 0 is the price pane (candles, volume band, overlay lines); every
+  // further pane is an oscillator: lines, histograms and fixed guides.
+  function Pane(chart, kind) {
+    this.chart = chart;
+    this.kind = kind;               // "price" | "osc"
+    this.hPx = kind === "osc" ? chart.opt.oscPaneHeight : null;
+    this.lines = {};                // id → {byTime, color, width}
+    this.hists = {};                // id → {byTime, pos, neg}   (osc only)
+    this.guides = [];               // {value, color}            (osc only)
+    this.y0 = 0; this.h = 0;        // set by layout
+    this.min = 0; this.max = 1;     // set per paint
+  }
+  Pane.prototype.toY = function (v) {
+    var usable = this.kind === "price" ? this.h * (1 - this.chart.opt.volumeHeightPct * 0.35) : this.h - 8;
+    var off = this.kind === "price" ? 0 : 4;
+    return this.y0 + off + (this.max - v) / (this.max - this.min) * usable;
+  };
+  Pane.prototype.toValue = function (y) {
+    var usable = this.kind === "price" ? this.h * (1 - this.chart.opt.volumeHeightPct * 0.35) : this.h - 8;
+    var off = this.kind === "price" ? 0 : 4;
+    return this.max - ((y - this.y0 - off) / usable) * (this.max - this.min);
+  };
+  Pane.prototype.computeScale = function (lo, hi) {
+    var min = Infinity, max = -Infinity, i, b, v, id;
+    var bars = this.chart.bars;
+    if (this.kind === "price") {
+      for (i = lo; i <= hi; i++) {
+        b = bars[i]; if (!b) continue;
+        if (b.low < min) min = b.low;
+        if (b.high > max) max = b.high;
+      }
+    }
+    for (id in this.lines) {
+      var ln = this.lines[id];
+      for (i = lo; i <= hi; i++) {
+        b = bars[i]; if (!b) continue;
+        v = ln.byTime.get(b.time);
+        if (isNum(v)) { if (v < min) min = v; if (v > max) max = v; }
+      }
+    }
+    for (id in this.hists) {
+      var hs = this.hists[id];
+      for (i = lo; i <= hi; i++) {
+        b = bars[i]; if (!b) continue;
+        v = hs.byTime.get(b.time);
+        if (isNum(v)) { if (v < min) min = v; if (v > max) max = v; if (0 < min) min = 0; if (0 > max) max = 0; }
+      }
+    }
+    for (i = 0; i < this.guides.length; i++) {
+      v = this.guides[i].value;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
+    if (min === max) { min -= 0.5; max += 0.5; }
+    var pad = (max - min) * this.chart.opt.autoScalePadPct;
+    this.min = min - pad; this.max = max + pad;
+  };
+
   function Chart(container, options) {
     var self = this;
     this.el = container;
     this.opt = Object.assign({}, DEFAULTS, options || {});
-    this.bars = [];              // {time(sec), open, high, low, close, volume}
-    this.lines = {};             // id → {data:[{time,value}], color, width, byTime:Map}
-    this.priceLines = [];        // {price, color, dash, label}
+    this.bars = [];
+    this.panes = [new Pane(this, "price")];
+    this.priceLines = [];
     this.barSpacing = this.opt.barSpacing;
-    this.rightIndex = 0;         // fractional bar index aligned to the right edge (before pad)
+    this.rightIndex = 0;
     this.crosshairCb = null;
-    this._cross = null;          // {x,y} in CSS px, or null
+    this._cross = null;
 
     container.style.position = container.style.position || "relative";
     container.style.background = this.opt.background;
@@ -97,8 +152,6 @@
   }
 
   Chart.prototype._mountLogo = function () {
-    // The license's attribution mark (LICENSE.md §1). Kept as DOM so it
-    // stays crisp at every DPR and never redraws with the data.
     var d = document.createElement("div");
     d.className = "trc-logo";
     d.style.cssText = "position:absolute;left:8px;bottom:" + (this.opt.timeAxisHeight + 8) +
@@ -126,60 +179,48 @@
     this._paint();
   };
 
-  // ── Coordinate frames ────────────────────────────────────────────────
-  // Plot area excludes the two axes.
-  Chart.prototype._plot = function () {
-    return { x: 0, y: 0, w: this.w - this.opt.priceAxisWidth, h: this.h - this.opt.timeAxisHeight };
+  // ── Layout: stack the panes inside the plot column ───────────────────
+  Chart.prototype._plotW = function () { return this.w - this.opt.priceAxisWidth; };
+  Chart.prototype._plotH = function () { return this.h - this.opt.timeAxisHeight; };
+  Chart.prototype._layout = function () {
+    var H = this._plotH();
+    var fixed = 0, i;
+    for (i = 1; i < this.panes.length; i++) fixed += this.panes[i].hPx;
+    // The price pane defends its share: squeeze osc panes proportionally
+    // when there are too many for the frame.
+    var minPrice = H * this.opt.minPricePaneFrac;
+    var scale = fixed > 0 && H - fixed < minPrice ? (H - minPrice) / fixed : 1;
+    var y = 0;
+    this.panes[0].y0 = 0;
+    this.panes[0].h = H - Math.round(fixed * scale);
+    y = this.panes[0].h;
+    for (i = 1; i < this.panes.length; i++) {
+      this.panes[i].y0 = y;
+      this.panes[i].h = Math.round(this.panes[i].hPx * scale);
+      y += this.panes[i].h;
+    }
   };
-  Chart.prototype.indexToX = function (i) {
-    var p = this._plot();
-    return p.w - (this.rightIndex + this.opt.rightPadBars - i) * this.barSpacing;
-  };
-  Chart.prototype.xToIndex = function (x) {
-    var p = this._plot();
-    return this.rightIndex + this.opt.rightPadBars - (p.w - x) / this.barSpacing;
-  };
-  Chart.prototype._visibleRange = function () {
-    var lo = Math.floor(this.xToIndex(0)), hi = Math.ceil(this.xToIndex(this._plot().w));
-    return [clamp(lo, 0, this.bars.length - 1), clamp(hi, 0, this.bars.length - 1)];
+  Chart.prototype._paneAt = function (y) {
+    for (var i = 0; i < this.panes.length; i++) {
+      var pn = this.panes[i];
+      if (y >= pn.y0 && y < pn.y0 + pn.h) return pn;
+    }
+    return null;
   };
 
-  // Vertical scale is recomputed per paint from what is visible (price and
-  // overlay lines both count — an EMA200 far from price must stay on-frame).
-  Chart.prototype._computeScale = function () {
-    var r = this._visibleRange(), lo = r[0], hi = r[1];
-    var min = Infinity, max = -Infinity, i, b;
-    for (i = lo; i <= hi; i++) {
-      b = this.bars[i];
-      if (!b) continue;
-      if (b.low < min) min = b.low;
-      if (b.high > max) max = b.high;
-    }
-    for (var id in this.lines) {
-      var ln = this.lines[id];
-      for (i = lo; i <= hi; i++) {
-        b = this.bars[i];
-        if (!b) continue;
-        var v = ln.byTime.get(b.time);
-        if (isNum(v)) { if (v < min) min = v; if (v > max) max = v; }
-      }
-    }
-    if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
-    if (min === max) { min -= 0.5; max += 0.5; }
-    var pad = (max - min) * this.opt.autoScalePadPct;
-    this._pMin = min - pad;
-    this._pMax = max + pad;
+  Chart.prototype.indexToX = function (i) {
+    return this._plotW() - (this.rightIndex + this.opt.rightPadBars - i) * this.barSpacing;
   };
-  Chart.prototype.priceToY = function (v) {
-    var p = this._plot();
-    var usable = p.h * (1 - this.opt.volumeHeightPct * 0.35); // candles may dip into the volume band's top
-    return (this._pMax - v) / (this._pMax - this._pMin) * usable;
+  Chart.prototype.xToIndex = function (x) {
+    return this.rightIndex + this.opt.rightPadBars - (this._plotW() - x) / this.barSpacing;
   };
-  Chart.prototype.yToPrice = function (y) {
-    var p = this._plot();
-    var usable = p.h * (1 - this.opt.volumeHeightPct * 0.35);
-    return this._pMax - (y / usable) * (this._pMax - this._pMin);
+  Chart.prototype._visibleRange = function () {
+    var lo = Math.floor(this.xToIndex(0)), hi = Math.ceil(this.xToIndex(this._plotW()));
+    return [clamp(lo, 0, this.bars.length - 1), clamp(hi, 0, this.bars.length - 1)];
   };
+  // Back-compat shorthands for the price pane
+  Chart.prototype.priceToY = function (v) { return this.panes[0].toY(v); };
+  Chart.prototype.yToPrice = function (y) { return this.panes[0].toValue(y); };
 
   // ── Data API ─────────────────────────────────────────────────────────
   Chart.prototype.setData = function (bars) {
@@ -193,17 +234,43 @@
     else {
       var atRight = Math.abs(this.rightIndex - (n - 1)) < 2;
       this.bars.push(bar);
-      if (atRight) this.rightIndex = this.bars.length - 1;  // follow live only if not scrolled back
+      if (atRight) this.rightIndex = this.bars.length - 1;
     }
     this._paint();
   };
-  Chart.prototype.addLine = function (id, data, color, width) {
-    var byTime = new Map();
-    (data || []).forEach(function (d) { byTime.set(d.time, d.value); });
-    this.lines[id] = { data: data || [], color: color || "#58a6ff", width: width || 1.4, byTime: byTime };
+  function toByTime(data) {
+    var m = new Map();
+    (data || []).forEach(function (d) { m.set(d.time, d.value); });
+    return m;
+  }
+  Chart.prototype.addLine = function (id, data, color, width, paneIndex) {
+    var pn = this._ensurePane(paneIndex || 0);
+    pn.lines[id] = { byTime: toByTime(data), color: color || "#58a6ff", width: width || 1.4 };
     this._paint();
   };
-  Chart.prototype.removeLine = function (id) { delete this.lines[id]; this._paint(); };
+  Chart.prototype.addHistogram = function (id, data, paneIndex, posColor, negColor) {
+    var pn = this._ensurePane(paneIndex);
+    pn.hists[id] = { byTime: toByTime(data), pos: posColor || "rgba(0,217,126,0.55)", neg: negColor || "rgba(248,81,73,0.55)" };
+    this._paint();
+  };
+  Chart.prototype.addGuide = function (paneIndex, value, color) {
+    this._ensurePane(paneIndex).guides.push({ value: value, color: color || "rgba(139,148,158,0.4)" });
+    this._paint();
+  };
+  Chart.prototype._ensurePane = function (i) {
+    if (!i) return this.panes[0];
+    while (this.panes.length <= i) this.panes.push(new Pane(this, "osc"));
+    return this.panes[i];
+  };
+  Chart.prototype.setPaneHeight = function (i, px) {
+    if (this.panes[i] && this.panes[i].kind === "osc") { this.panes[i].hPx = px; this._paint(); }
+  };
+  Chart.prototype.removeOscPanes = function () { this.panes = [this.panes[0]]; this._paint(); };
+  Chart.prototype.removeLine = function (id, paneIndex) {
+    var pn = this.panes[paneIndex || 0];
+    if (pn) { delete pn.lines[id]; delete pn.hists[id]; }
+    this._paint();
+  };
   Chart.prototype.addPriceLine = function (price, color, label) {
     this.priceLines.push({ price: price, color: color || "#8b949e", label: label });
     this._paint();
@@ -216,41 +283,29 @@
 
   // ── Painting ─────────────────────────────────────────────────────────
   Chart.prototype._paint = function () {
-    var c = this.ctx, o = this.opt, p = this._plot();
-    if (!p.w || !p.h) return;
-    this._computeScale();
+    var c = this.ctx, o = this.opt, W = this._plotW(), H = this._plotH();
+    if (!W || !H) return;
+    this._layout();
+    var rng = this._visibleRange(), lo = rng[0], hi = rng[1];
+    for (var pi = 0; pi < this.panes.length; pi++) this.panes[pi].computeScale(lo, hi);
+
     c.clearRect(0, 0, this.w, this.h);
     c.fillStyle = o.background;
     c.fillRect(0, 0, this.w, this.h);
     c.font = o.font;
 
-    // price grid + axis labels
-    var span = this._pMax - this._pMin;
-    var step = niceStep(span, Math.max(3, Math.round(p.h / 55)));
-    var dec = stepDecimals(step);
-    var first = Math.ceil(this._pMin / step) * step;
-    c.textBaseline = "middle";
-    for (var v = first; v <= this._pMax; v += step) {
-      var y = this.priceToY(v);
-      if (y < 4 || y > p.h - 4) continue;
-      c.strokeStyle = o.gridColor; c.lineWidth = 1;
-      c.beginPath(); c.moveTo(0, Math.round(y) + 0.5); c.lineTo(p.w, Math.round(y) + 0.5); c.stroke();
-      c.fillStyle = o.textColor;
-      c.fillText(fmtPrice(v, dec), p.w + 8, y);
-    }
+    var i, b, x, y, v;
 
-    // time grid + labels: pick a bar step that keeps labels ~90px apart
-    var rng = this._visibleRange(), lo = rng[0], hi = rng[1];
+    // time grid first (spans all panes)
     var barStep = Math.max(1, Math.round(90 / this.barSpacing));
     var lastDay = null;
     c.textBaseline = "top";
-    for (var i = lo - (lo % barStep); i <= hi; i += barStep) {
-      var b = this.bars[i];
-      if (!b) continue;
-      var x = this.indexToX(i);
-      if (x < 0 || x > p.w) continue;
+    for (i = lo - (lo % barStep); i <= hi; i += barStep) {
+      b = this.bars[i]; if (!b) continue;
+      x = this.indexToX(i);
+      if (x < 0 || x > W) continue;
       c.strokeStyle = o.gridColor;
-      c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, p.h); c.stroke();
+      c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, H); c.stroke();
       var d = new Date(b.time * 1000);
       var dayKey = d.getUTCMonth() + "-" + d.getUTCDate();
       var label = (dayKey !== lastDay)
@@ -258,11 +313,26 @@
         : pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
       lastDay = dayKey;
       c.fillStyle = o.textColor;
-      c.fillText(label, x - c.measureText(label).width / 2, p.h + 7);
+      c.fillText(label, x - c.measureText(label).width / 2, H + 7);
     }
 
-    // volume band
-    var volTop = p.h * (1 - o.volumeHeightPct);
+    // ── price pane ──
+    var pp = this.panes[0];
+    var span = pp.max - pp.min;
+    var step = niceStep(span, Math.max(3, Math.round(pp.h / 55)));
+    var dec = stepDecimals(step);
+    var first = Math.ceil(pp.min / step) * step;
+    c.textBaseline = "middle";
+    for (v = first; v <= pp.max; v += step) {
+      y = pp.toY(v);
+      if (y < pp.y0 + 4 || y > pp.y0 + pp.h - 4) continue;
+      c.strokeStyle = o.gridColor; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(0, Math.round(y) + 0.5); c.lineTo(W, Math.round(y) + 0.5); c.stroke();
+      c.fillStyle = o.textColor;
+      c.fillText(fmtPrice(v, dec), W + 8, y);
+    }
+
+    var volTop = pp.h * (1 - o.volumeHeightPct);
     var maxVol = 0;
     for (i = lo; i <= hi; i++) { b = this.bars[i]; if (b && b.volume > maxVol) maxVol = b.volume; }
     if (maxVol > 0) {
@@ -270,117 +340,152 @@
       for (i = lo; i <= hi; i++) {
         b = this.bars[i]; if (!b || !b.volume) continue;
         var vx = this.indexToX(i);
-        var vh = (b.volume / maxVol) * (p.h - volTop - 2);
+        var vh = (b.volume / maxVol) * (pp.h - volTop - 2);
         c.fillStyle = b.close >= b.open ? o.volumeUp : o.volumeDown;
-        c.fillRect(vx - bw / 2, p.h - vh, bw, vh);
+        c.fillRect(vx - bw / 2, pp.y0 + pp.h - vh, bw, vh);
       }
     }
 
-    // candles
     var half = Math.max(0.5, this.barSpacing * 0.35);
     for (i = lo; i <= hi; i++) {
       b = this.bars[i]; if (!b) continue;
       var cx = this.indexToX(i);
-      if (cx < -this.barSpacing || cx > p.w + this.barSpacing) continue;
+      if (cx < -this.barSpacing || cx > W + this.barSpacing) continue;
       var up = b.close >= b.open;
-      var yO = this.priceToY(b.open), yC = this.priceToY(b.close);
-      var yH = this.priceToY(b.high), yL = this.priceToY(b.low);
+      var yO = pp.toY(b.open), yC = pp.toY(b.close);
+      var yH = pp.toY(b.high), yL = pp.toY(b.low);
       c.strokeStyle = up ? o.wickUp : o.wickDown;
       c.lineWidth = 1;
       c.beginPath(); c.moveTo(Math.round(cx) + 0.5, yH); c.lineTo(Math.round(cx) + 0.5, yL); c.stroke();
       c.fillStyle = up ? o.upColor : o.downColor;
-      var top = Math.min(yO, yC);
-      c.fillRect(cx - half, top, half * 2, Math.max(1, Math.abs(yC - yO)));
+      c.fillRect(cx - half, Math.min(yO, yC), half * 2, Math.max(1, Math.abs(yC - yO)));
     }
 
-    // overlay lines (EMA & co.), clipped to the plot
-    c.save();
-    c.beginPath(); c.rect(0, 0, p.w, p.h); c.clip();
-    for (var id in this.lines) {
-      var ln = this.lines[id];
-      c.strokeStyle = ln.color; c.lineWidth = ln.width;
-      c.beginPath();
-      var started = false;
-      for (i = lo; i <= hi; i++) {
-        b = this.bars[i]; if (!b) continue;
-        var lv = ln.byTime.get(b.time);
-        if (!isNum(lv)) { started = false; continue; }
-        var lx = this.indexToX(i), ly = this.priceToY(lv);
-        if (!started) { c.moveTo(lx, ly); started = true; } else c.lineTo(lx, ly);
+    // ── every pane: histograms, guides, lines (price pane has only lines) ──
+    for (pi = 0; pi < this.panes.length; pi++) {
+      var pn = this.panes[pi];
+      c.save();
+      c.beginPath(); c.rect(0, pn.y0, W, pn.h); c.clip();
+
+      var id;
+      for (id in pn.hists) {
+        var hs = pn.hists[id];
+        var zeroY = pn.toY(0);
+        var hw = Math.max(1, this.barSpacing * 0.55);
+        for (i = lo; i <= hi; i++) {
+          b = this.bars[i]; if (!b) continue;
+          v = hs.byTime.get(b.time);
+          if (!isNum(v)) continue;
+          var hx = this.indexToX(i);
+          var hy = pn.toY(v);
+          c.fillStyle = v >= 0 ? hs.pos : hs.neg;
+          c.fillRect(hx - hw / 2, Math.min(zeroY, hy), hw, Math.max(1, Math.abs(zeroY - hy)));
+        }
       }
-      c.stroke();
-    }
-    c.restore();
+      for (i = 0; i < pn.guides.length; i++) {
+        var g = pn.guides[i];
+        var gy = pn.toY(g.value);
+        c.strokeStyle = g.color; c.lineWidth = 1; c.setLineDash([4, 3]);
+        c.beginPath(); c.moveTo(0, Math.round(gy) + 0.5); c.lineTo(W, Math.round(gy) + 0.5); c.stroke();
+        c.setLineDash([]);
+      }
+      for (id in pn.lines) {
+        var ln = pn.lines[id];
+        c.strokeStyle = ln.color; c.lineWidth = ln.width;
+        c.beginPath();
+        var started = false;
+        for (i = lo; i <= hi; i++) {
+          b = this.bars[i]; if (!b) continue;
+          v = ln.byTime.get(b.time);
+          if (!isNum(v)) { started = false; continue; }
+          var lx = this.indexToX(i), ly = pn.toY(v);
+          if (!started) { c.moveTo(lx, ly); started = true; } else c.lineTo(lx, ly);
+        }
+        c.stroke();
+      }
+      c.restore();
 
-    // price lines + last-price tag
+      // osc pane: right-axis labels for its own scale (top & bottom values)
+      if (pn.kind === "osc") {
+        var oStep = niceStep(pn.max - pn.min, Math.max(2, Math.round(pn.h / 45)));
+        var oDec = stepDecimals(oStep);
+        var oFirst = Math.ceil(pn.min / oStep) * oStep;
+        c.textBaseline = "middle"; c.fillStyle = o.textColor;
+        for (v = oFirst; v <= pn.max; v += oStep) {
+          y = pn.toY(v);
+          if (y < pn.y0 + 8 || y > pn.y0 + pn.h - 8) continue;
+          c.fillText(fmtPrice(v, oDec), W + 8, y);
+        }
+        // separator above the pane
+        c.strokeStyle = o.separatorColor;
+        c.beginPath(); c.moveTo(0, pn.y0 + 0.5); c.lineTo(this.w, pn.y0 + 0.5); c.stroke();
+      }
+    }
+
+    // price lines + last-price tag (price pane only)
     var last = this.bars[this.bars.length - 1];
     var tags = this.priceLines.slice();
     if (last) tags.push({ price: last.close, color: last.close >= last.open ? o.upColor : o.downColor, _last: true });
     for (i = 0; i < tags.length; i++) {
       var t = tags[i];
-      var ty = this.priceToY(t.price);
-      if (ty < 0 || ty > p.h) continue;
-      c.strokeStyle = t.color; c.lineWidth = 1;
-      c.setLineDash([4, 3]);
-      c.beginPath(); c.moveTo(0, Math.round(ty) + 0.5); c.lineTo(p.w, Math.round(ty) + 0.5); c.stroke();
+      var ty = pp.toY(t.price);
+      if (ty < pp.y0 || ty > pp.y0 + pp.h) continue;
+      c.strokeStyle = t.color; c.lineWidth = 1; c.setLineDash([4, 3]);
+      c.beginPath(); c.moveTo(0, Math.round(ty) + 0.5); c.lineTo(W, Math.round(ty) + 0.5); c.stroke();
       c.setLineDash([]);
       var txt = fmtPrice(t.price, dec);
-      var tw = c.measureText(txt).width + 10;
       c.fillStyle = t._last ? t.color : o.tagBg;
-      c.fillRect(p.w, ty - 9, Math.max(tw, o.priceAxisWidth), 18);
+      c.fillRect(W, ty - 9, o.priceAxisWidth, 18);
       c.fillStyle = t._last ? "#0d1117" : o.tagText;
       c.textBaseline = "middle";
-      c.fillText(txt, p.w + 5, ty);
+      c.fillText(txt, W + 5, ty);
     }
 
-    // axis separators
     c.strokeStyle = o.gridColor;
-    c.beginPath(); c.moveTo(p.w + 0.5, 0); c.lineTo(p.w + 0.5, this.h); c.stroke();
-    c.beginPath(); c.moveTo(0, p.h + 0.5); c.lineTo(this.w, p.h + 0.5); c.stroke();
+    c.beginPath(); c.moveTo(W + 0.5, 0); c.lineTo(W + 0.5, this.h); c.stroke();
+    c.beginPath(); c.moveTo(0, H + 0.5); c.lineTo(this.w, H + 0.5); c.stroke();
 
     this._paintCross();
   };
 
   Chart.prototype._paintCross = function () {
-    var c = this.octx, o = this.opt, p = this._plot();
+    var c = this.octx, o = this.opt, W = this._plotW(), H = this._plotH();
     c.clearRect(0, 0, this.w, this.h);
     if (!this._cross) return;
     var x = this._cross.x, y = this._cross.y;
-    if (x > p.w || y > p.h) return;
+    if (x > W || y > H) return;
     var i = clamp(Math.round(this.xToIndex(x)), 0, this.bars.length - 1);
     var b = this.bars[i];
     var bx = this.indexToX(i);
     c.strokeStyle = o.crosshair; c.lineWidth = 1; c.setLineDash([4, 3]);
-    c.beginPath(); c.moveTo(Math.round(bx) + 0.5, 0); c.lineTo(Math.round(bx) + 0.5, p.h); c.stroke();
-    c.beginPath(); c.moveTo(0, Math.round(y) + 0.5); c.lineTo(p.w, Math.round(y) + 0.5); c.stroke();
+    c.beginPath(); c.moveTo(Math.round(bx) + 0.5, 0); c.lineTo(Math.round(bx) + 0.5, H); c.stroke();
+    c.beginPath(); c.moveTo(0, Math.round(y) + 0.5); c.lineTo(W, Math.round(y) + 0.5); c.stroke();
     c.setLineDash([]);
     c.font = o.font; c.textBaseline = "middle";
-    // y tag
-    var span = this._pMax - this._pMin;
-    var dec = stepDecimals(niceStep(span, 8));
-    var py = fmtPrice(this.yToPrice(y), dec);
+    // the y tag speaks the scale of the pane under the cursor
+    var pn = this._paneAt(y) || this.panes[0];
+    var val = pn.toValue(y);
+    var dec = stepDecimals(niceStep(pn.max - pn.min, 8));
+    var py = fmtPrice(val, dec);
     c.fillStyle = o.tagBg;
-    c.fillRect(p.w, y - 9, o.priceAxisWidth, 18);
+    c.fillRect(W, y - 9, o.priceAxisWidth, 18);
     c.fillStyle = o.tagText;
-    c.fillText(py, p.w + 5, y);
-    // x tag
+    c.fillText(py, W + 5, y);
     if (b) {
       var d = new Date(b.time * 1000);
       var xt = d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + " " + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
       var tw = c.measureText(xt).width + 12;
       c.fillStyle = o.tagBg;
-      c.fillRect(clamp(bx - tw / 2, 0, p.w - tw), p.h, tw, o.timeAxisHeight - 2);
+      c.fillRect(clamp(bx - tw / 2, 0, W - tw), H, tw, o.timeAxisHeight - 2);
       c.fillStyle = o.tagText;
-      c.fillText(xt, clamp(bx - tw / 2, 0, p.w - tw) + 6, p.h + o.timeAxisHeight / 2 - 1);
+      c.fillText(xt, clamp(bx - tw / 2, 0, W - tw) + 6, H + o.timeAxisHeight / 2 - 1);
     }
-    if (this.crosshairCb) this.crosshairCb(b ? { bar: b, index: i, price: this.yToPrice(y) } : null);
+    if (this.crosshairCb) this.crosshairCb(b ? { bar: b, index: i, price: this.panes[0].toValue(y), paneValue: val } : null);
   };
 
-  // ── Interaction ──────────────────────────────────────────────────────
   Chart.prototype._bind = function () {
     var self = this, el = this.overlay;
-    var drag = null;          // {x0, right0}
-    var pinch = null;         // {d0, spacing0, mid}
+    var drag = null, pinch = null;
 
     el.addEventListener("mousemove", function (e) {
       var r = el.getBoundingClientRect();
@@ -404,18 +509,17 @@
       e.preventDefault();
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left;
-      var anchor = self.xToIndex(x);              // keep the bar under the cursor put
+      var anchor = self.xToIndex(x);
       var k = Math.exp(-e.deltaY * 0.0015);
       self.barSpacing = clamp(self.barSpacing * k, self.opt.minBarSpacing, self.opt.maxBarSpacing);
-      self.rightIndex = anchor - (self.xToIndex(x) - self.rightIndex); // re-anchor
+      self.rightIndex = anchor - (self.xToIndex(x) - self.rightIndex);
       self._paint();
     }, { passive: false });
 
     el.addEventListener("touchstart", function (e) {
       var r = el.getBoundingClientRect();
-      if (e.touches.length === 1) {
-        drag = { x0: e.touches[0].clientX - r.left, right0: self.rightIndex };
-      } else if (e.touches.length === 2) {
+      if (e.touches.length === 1) drag = { x0: e.touches[0].clientX - r.left, right0: self.rightIndex };
+      else if (e.touches.length === 2) {
         drag = null;
         var dx = e.touches[0].clientX - e.touches[1].clientX;
         pinch = { d0: Math.abs(dx) || 1, spacing0: self.barSpacing };
@@ -438,7 +542,7 @@
   };
 
   global.TRCharts = {
-    version: "0.1.0",
+    version: "0.2.0",
     createChart: function (el, options) { return new Chart(el, options); },
   };
 })(typeof window !== "undefined" ? window : this);

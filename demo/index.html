@@ -9,13 +9,13 @@
   header { padding: 14px 18px; display: flex; align-items: baseline; gap: 12px; }
   h1 { font-size: 16px; margin: 0; }
   .muted { color: #8b949e; font-size: 12px; }
-  #chart { width: 100%; height: 520px; }
+  #chart { width: 100%; height: 640px; }
   #readout { padding: 8px 18px; color: #8b949e; font: 12px ui-monospace, Menlo, monospace; min-height: 18px; }
 </style>
 </head>
 <body>
 <header><h1>TradeRead Charts v0</h1>
-  <span class="muted">demo: random walk, 600 bars · EMA 20/50 · price line · live ticks</span></header>
+  <span class="muted">demo: random walk, 600 bars · EMA 20/50 · RSI pane · MACD pane · live ticks</span></header>
 <div id="chart"></div>
 <div id="readout"></div>
 <script src="../src/traderead-charts.js"></script>
@@ -37,11 +37,53 @@
     bars.forEach(function (b) { prev = prev === null ? b.close : b.close * k + prev * (1 - k); out.push({ time: b.time, value: prev }); });
     return out;
   }
+  // Wilder RSI and EMA-based MACD, computed here in the demo — the engine
+  // draws series, the caller owns the math (same split as in production).
+  function rsi(period) {
+    var out = [], gain = 0, loss = 0, i, ch;
+    for (i = 1; i < bars.length; i++) {
+      ch = bars[i].close - bars[i - 1].close;
+      if (i <= period) { gain += Math.max(ch, 0); loss += Math.max(-ch, 0); if (i === period) { } }
+      if (i === period) { gain /= period; loss /= period; }
+      else if (i > period) {
+        gain = (gain * (period - 1) + Math.max(ch, 0)) / period;
+        loss = (loss * (period - 1) + Math.max(-ch, 0)) / period;
+      }
+      if (i >= period) out.push({ time: bars[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+    }
+    return out;
+  }
+  function emaOf(values, period) {
+    var k = 2 / (period + 1), out = [], prev = null;
+    values.forEach(function (v) { prev = prev === null ? v.value : v.value * k + prev * (1 - k); out.push({ time: v.time, value: prev }); });
+    return out;
+  }
+  function macd(f, s, sig) {
+    var closes = bars.map(function (b) { return { time: b.time, value: b.close }; });
+    var ef = emaOf(closes, f), es = emaOf(closes, s);
+    var line = ef.map(function (x, i) { return { time: x.time, value: x.value - es[i].value }; }).slice(s - 1);
+    var signal = emaOf(line, sig);
+    var hist = line.map(function (x, i) { return { time: x.time, value: x.value - signal[i].value }; });
+    return { line: line, signal: signal, hist: hist };
+  }
+
   var chart = TRCharts.createChart(document.getElementById("chart"));
   chart.setData(bars);
   chart.addLine("ema20", ema(20), "#f0b429", 1.4);
   chart.addLine("ema50", ema(50), "#58a6ff", 1.4);
   chart.addPriceLine(bars[bars.length - 1].close * 1.02, "#00d97e", "target");
+
+  // pane 1: RSI 14 with 70/30 guides
+  chart.addLine("rsi", rsi(14), "#c084fc", 1.4, 1);
+  chart.addGuide(1, 70, "rgba(248,81,73,0.5)");
+  chart.addGuide(1, 30, "rgba(0,217,126,0.5)");
+
+  // pane 2: MACD 12/26/9 — histogram under the lines, zero guide
+  var m = macd(12, 26, 9);
+  chart.addHistogram("macdH", m.hist, 2);
+  chart.addLine("macd", m.line, "#58a6ff", 1.2, 2);
+  chart.addLine("macdSig", m.signal, "#f0b429", 1.2, 2);
+  chart.addGuide(2, 0, "rgba(139,148,158,0.4)");
   chart.onCrosshair(function (info) {
     document.getElementById("readout").textContent = info
       ? "bar " + info.index + " · O " + info.bar.open.toFixed(0) + " H " + info.bar.high.toFixed(0) +
