@@ -273,6 +273,82 @@
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
+
+  // ── Symbol search ────────────────────────────────────────────────────
+  // The selector ships with the widget; the DATA behind it is pluggable:
+  //   symbolSearch: {
+  //     search: function (query, cb) { cb([{symbol, display, name, exchange}]) },
+  //     onSelect: function (item) { ... host loads bars ... },
+  //   }
+  // Matches by ticker or by name; several results = the dropdown decides.
+  Chart.prototype._toggleSearch = function () {
+    var self = this, o = this.opt;
+    var cfg = o.symbolSearch;
+    if (!cfg || !cfg.search) return;
+    if (this._searchBox) { this._searchBox.remove(); this._searchBox = null; return; }
+    var wrap = document.createElement("div");
+    wrap.className = "trc-search";
+    wrap.style.cssText = "position:absolute;inset:0;z-index:22;display:flex;align-items:flex-start;justify-content:center;" +
+      "background:rgba(0,0,0,0.5);padding-top:48px;";
+    var box = document.createElement("div");
+    box.style.cssText = "width:min(420px,92%);background:" + o.background + ";border:1px solid " + o.separatorColor + ";" +
+      "border-radius:14px;padding:10px;box-shadow:0 12px 40px rgba(0,0,0,0.4);";
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.placeholder = "Search ticker or name…";
+    inp.style.cssText = "width:100%;box-sizing:border-box;background:none;border:1px solid " + o.separatorColor + ";" +
+      "border-radius:9px;color:" + o.tagText + ";font:600 14px -apple-system,'Segoe UI',sans-serif;padding:9px 12px;outline:none;";
+    var list = document.createElement("div");
+    list.style.cssText = "margin-top:8px;max-height:300px;overflow:auto;";
+    box.appendChild(inp); box.appendChild(list);
+    wrap.appendChild(box);
+    wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
+    this.el.appendChild(wrap);
+    this._searchBox = wrap;
+    inp.focus();
+
+    var items = [], active = -1, timer = null;
+    function close() { wrap.remove(); self._searchBox = null; }
+    function paint() {
+      list.innerHTML = "";
+      items.forEach(function (it, i) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.style.cssText = "display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:none;" +
+          "background:" + (i === active ? "rgba(99,102,241,0.25)" : "none") + ";color:" + o.tagText + ";" +
+          "font:600 13px -apple-system,'Segoe UI',sans-serif;border-radius:8px;padding:8px 10px;cursor:pointer;";
+        row.innerHTML = '<span style="min-width:64px;font-weight:800;">' + (it.display || it.symbol) + "</span>" +
+          '<span style="flex:1;color:' + o.textColor + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (it.name || "") + "</span>" +
+          (it.exchange ? '<span style="font-size:10px;font-weight:800;color:' + o.textColor + ';border:1px solid ' + o.separatorColor + ';border-radius:5px;padding:1px 5px;">' + it.exchange + "</span>" : "");
+        row.addEventListener("click", function () { pick(it); });
+        row.addEventListener("mouseenter", function () { active = i; paint(); });
+        list.appendChild(row);
+      });
+      if (!items.length && inp.value.trim()) {
+        list.innerHTML = '<div style="color:' + o.textColor + ';font:12px -apple-system,sans-serif;padding:10px;">No matches.</div>';
+      }
+    }
+    function pick(it) {
+      close();
+      if (cfg.onSelect) cfg.onSelect(it);
+    }
+    inp.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        var q = inp.value.trim();
+        if (!q) { items = []; active = -1; paint(); return; }
+        cfg.search(q, function (res) { items = res || []; active = items.length ? 0 : -1; paint(); });
+      }, 160);
+    });
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowDown") { active = Math.min(active + 1, items.length - 1); paint(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); paint(); e.preventDefault(); }
+      else if (e.key === "Enter" && active >= 0 && items[active]) pick(items[active]);
+    });
+  };
+
+  // A picker list, not a blind cycle: seven types, current one checked.
   Chart.prototype._toggleTypeMenu = function (anchorBtn) {
     var self = this, o = this.opt;
     if (this._typeMenu) { this._typeMenu.remove(); this._typeMenu = null; return; }
@@ -555,6 +631,26 @@
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
   };
+  // Live tick with the bucket roll built in: when the clock crosses the bar
+  // boundary a NEW candle opens at the last close. On the production site,
+  // candles once froze at their close because only "update the last bar"
+  // existed — that class of bug ends here, inside the library.
+  Chart.prototype.tick = function (price, volume, nowSec) {
+    var n = this.bars.length;
+    if (!n || !isNum(price)) return;
+    var sec = this._barSec || 3600;
+    var now = isNum(nowSec) ? nowSec : Math.floor(Date.now() / 1000);
+    var last = this.bars[n - 1];
+    var bucket = Math.floor(now / sec) * sec;
+    if (bucket > last.time) {
+      this.update({ time: bucket, open: last.close, high: Math.max(last.close, price),
+        low: Math.min(last.close, price), close: price, volume: volume || 0 });
+    } else {
+      this.update({ time: last.time, open: last.open, high: Math.max(last.high, price),
+        low: Math.min(last.low, price), close: price, volume: (last.volume || 0) + (volume || 0) });
+    }
+    this._paintHeader();
+  };
   function toByTime(data) {
     var m = new Map();
     (data || []).forEach(function (d) { m.set(d.time, d.value); });
@@ -742,8 +838,15 @@
     if (!this._header) {
       var h = document.createElement("div");
       h.className = "trc-header";
+      var clickable = !!(this.opt.symbolSearch && this.opt.symbolSearch.search);
       h.style.cssText = "position:absolute;left:46px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
-        "font:800 15px -apple-system,'Segoe UI',sans-serif;pointer-events:none;user-select:none;";
+        "font:800 15px -apple-system,'Segoe UI',sans-serif;user-select:none;" +
+        (clickable ? "cursor:pointer;" : "pointer-events:none;");
+      if (clickable) {
+        var self2 = this;
+        h.title = "Search ticker or name";
+        h.addEventListener("click", function () { self2._toggleSearch(); });
+      }
       this.el.appendChild(h);
       this._header = h;
     }
@@ -1689,7 +1792,7 @@
   };
 
   global.TRCharts = {
-    version: "0.11.0",
+    version: "0.12.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };

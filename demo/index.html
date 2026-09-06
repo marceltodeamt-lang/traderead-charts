@@ -20,7 +20,7 @@
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.10</h1>
+  <h1>TradeRead Charts v0.12</h1>
   <div class="grp" id="tfs"></div>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
@@ -46,13 +46,65 @@
     return out;
   }
 
-  var chart = TRCharts.createChart(document.getElementById("chart"));
+  // ── Adaptor Binance (gratuit, fara cheie) pentru selectorul de tickere:
+  //    biblioteca da UI-ul, sursa de date e pluggable — pe traderead.ai va fi
+  //    API-ul nostru (Alpaca + Binance), aici e exemplul functional public.
+  var NAMES = { BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", XRP: "XRP", DOGE: "Dogecoin", ADA: "Cardano",
+    LINK: "Chainlink", AVAX: "Avalanche", DOT: "Polkadot", NEAR: "NEAR Protocol", ATOM: "Cosmos", UNI: "Uniswap",
+    LTC: "Litecoin", BCH: "Bitcoin Cash", TRX: "TRON", SHIB: "Shiba Inu", PEPE: "Pepe", WIF: "dogwifhat",
+    APT: "Aptos", ARB: "Arbitrum", OP: "Optimism", INJ: "Injective", TIA: "Celestia", SEI: "Sei", FET: "Fetch.ai",
+    RENDER: "Render", TAO: "Bittensor", FIL: "Filecoin", HBAR: "Hedera", SUI: "Sui", TON: "Toncoin", ETC: "Ethereum Classic" };
+  var SYMBOLS = null;
+  function loadSymbols(cb) {
+    if (SYMBOLS) return cb(SYMBOLS);
+    fetch("https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        SYMBOLS = (d.symbols || [])
+          .filter(function (x) { return x.status === "TRADING" && x.quoteAsset === "USDT"; })
+          .map(function (x) { return { symbol: x.symbol, display: x.baseAsset, name: NAMES[x.baseAsset] || "", exchange: "Binance" }; });
+        cb(SYMBOLS);
+      })
+      .catch(function () { cb([]); });
+  }
+  var TF_BINANCE = { 60: "1m", 300: "5m", 900: "15m", 3600: "1h", 14400: "4h", 86400: "1d", 604800: "1w" };
+  var liveSymbol = null;   // null = datele sintetice
+  function loadReal(item) {
+    fetch("https://api.binance.com/api/v3/klines?symbol=" + item.symbol + "&interval=" + (TF_BINANCE[tfSec] || "1h") + "&limit=600")
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        bars = rows.map(function (k) {
+          return { time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] };
+        });
+        liveSymbol = item;
+        chart.setData(bars);
+        chart.setPersistKey("trc-demo:" + item.symbol + ":" + tfSec);
+        chart.setSymbolInfo({ ticker: item.display, title: item.name || item.symbol, tf: tfName() });
+        chart.setMarkers([]);
+      })
+      .catch(function (e) { console.error("klines", e); });
+  }
+  function tfName() { return TFS.filter(function (t) { return t[1] === tfSec; })[0][0]; }
+
+  var chart = TRCharts.createChart(document.getElementById("chart"), {
+    symbolSearch: {
+      search: function (q, cb) {
+        loadSymbols(function (list) {
+          var s = q.toUpperCase();
+          cb(list.filter(function (it) {
+            return it.display.indexOf(s) === 0 || it.symbol.indexOf(s) === 0 ||
+              (it.name && it.name.toUpperCase().indexOf(s) >= 0);
+          }).slice(0, 30));
+        });
+      },
+      onSelect: loadReal,
+    },
+  });
   function load() {
     bars = genBars();
     chart.setData(bars);
     chart.setPersistKey("trc-demo:" + tfSec);
-    var tfName = TFS.filter(function (t) { return t[1] === tfSec; })[0][0];
-    chart.setSymbolInfo({ ticker: "BTC", title: "Bitcoin / TetherUS", tf: tfName });
+    chart.setSymbolInfo({ ticker: "DEMO", title: "Synthetic random walk — click to search", tf: tfName() });
     // fara nimic salvat: pornim cu setul standard al widgetului de productie
     if (!chart.getIndicators().length && !localStorage.getItem("trc-demo:" + tfSec + ":ind")) {
       chart.addIndicator("ema", { p: 9 }, "#00d97e");
@@ -72,7 +124,8 @@
     b.addEventListener("click", function () {
       tfSec = tf[1];
       tfBar.querySelectorAll("button").forEach(function (x) { x.className = x === b ? "on" : ""; });
-      load();
+      if (liveSymbol) loadReal(liveSymbol);
+      else load();
     });
     tfBar.appendChild(b);
   });
@@ -97,9 +150,21 @@
         " L " + info.bar.low.toFixed(0) + " C " + info.bar.close.toFixed(0) + " · cursor " + info.paneValue.toFixed(2)
       : "";
   });
+  // date reale: ultimele 2 candele la fiecare 5s — update() ruleaza rollul
+  setInterval(function () {
+    if (!liveSymbol) return;
+    fetch("https://api.binance.com/api/v3/klines?symbol=" + liveSymbol.symbol + "&interval=" + (TF_BINANCE[tfSec] || "1h") + "&limit=2")
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        rows.forEach(function (k) {
+          chart.update({ time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] });
+        });
+      }).catch(function () {});
+  }, 5000);
+
   var rndLive = mulberry(7);
   setInterval(function () {
-    if (!bars.length) return;
+    if (!bars.length || liveSymbol) return;
     var b = Object.assign({}, bars[bars.length - 1]);
     b.close += (rndLive() - 0.5) * 60 * Math.sqrt(tfSec / 3600);
     b.high = Math.max(b.high, b.close); b.low = Math.min(b.low, b.close);
