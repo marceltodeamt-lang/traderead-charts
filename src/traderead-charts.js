@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.7.0
+ * TradeRead Charts v0.8.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -174,15 +174,35 @@
   // ui: true (default) mounts the production-style rail: drawing tools,
   // the TradingView-style indicator panel (many EMAs, SMA, add/remove,
   // editable params), the chart-type switcher and a PNG camera.
+  var SVGI = function (inner) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">' + inner + "</svg>";
+  };
+  var ICONS = {
+    cursor: SVGI('<path d="M4 2 L12 8.5 L8.2 9.3 L6.2 13.5 Z" fill="currentColor" stroke="none"/>'),
+    trend: SVGI('<line x1="3" y1="13" x2="13" y2="3"/><circle cx="3" cy="13" r="1.4" fill="currentColor" stroke="none"/><circle cx="13" cy="3" r="1.4" fill="currentColor" stroke="none"/>'),
+    hline: SVGI('<line x1="2" y1="8" x2="14" y2="8"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/>'),
+    rect: SVGI('<rect x="3" y="4.5" width="10" height="7" rx="1"/>'),
+    fib: SVGI('<line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="13.5" y2="8" opacity="0.55"/><line x1="2.5" y1="12" x2="13.5" y2="12"/>'),
+    text: SVGI('<path d="M4 4 H12 M8 4 V12.5" />'),
+    trash: SVGI('<line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>'),
+    ind: SVGI('<path d="M2.5 11 L6 7 L9 9.5 L13.5 4"/><circle cx="13.5" cy="4" r="1.3" fill="currentColor" stroke="none"/>'),
+    camera: SVGI('<rect x="2.5" y="5" width="11" height="8" rx="1.5"/><path d="M6 5 L7 3.2 H9 L10 5"/><circle cx="8" cy="9" r="2.2"/>'),
+    candles: SVGI('<line x1="5" y1="2.5" x2="5" y2="13.5"/><rect x="3.4" y="5" width="3.2" height="5" fill="currentColor" stroke="none" rx="0.6"/><line x1="11" y1="2.5" x2="11" y2="13.5"/><rect x="9.4" y="4" width="3.2" height="6.5" fill="currentColor" stroke="none" rx="0.6"/>'),
+    bars: SVGI('<line x1="5" y1="3" x2="5" y2="13"/><line x1="3.5" y1="6" x2="5" y2="6"/><line x1="5" y1="10" x2="6.5" y2="10"/><line x1="11" y1="3" x2="11" y2="13"/><line x1="9.5" y1="7" x2="11" y2="7"/><line x1="11" y1="11" x2="12.5" y2="11"/>'),
+    line: SVGI('<path d="M2.5 11 L6 7 L9 9.5 L13.5 4"/>'),
+    area: SVGI('<path d="M2.5 11 L6 7 L9 9.5 L13.5 4 V13 H2.5 Z" fill="currentColor" opacity="0.35" stroke="none"/><path d="M2.5 11 L6 7 L9 9.5 L13.5 4"/>'),
+    baseline: SVGI('<line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="2 2"/><path d="M2.5 10.5 L6 5.5 L9 9 L13.5 4"/>'),
+  };
+
   Chart.prototype._mountUI = function () {
     var self = this, o = this.opt;
     var rail = document.createElement("div");
     rail.className = "trc-rail";
     rail.style.cssText = "position:absolute;left:8px;top:10px;z-index:6;display:flex;flex-direction:column;gap:3px;" +
       "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:10px;padding:4px;";
-    function btn(label, tip, fn) {
+    function btn(icon, tip, fn) {
       var b = document.createElement("button");
-      b.type = "button"; b.textContent = label; b.title = tip;
+      b.type = "button"; b.innerHTML = icon; b.title = tip;
       b.style.cssText = "border:none;background:none;color:" + o.textColor + ";width:26px;height:26px;" +
         "border-radius:7px;cursor:pointer;font:700 13px -apple-system,'Segoe UI',sans-serif;line-height:1;";
       b.addEventListener("click", function () { fn(b); });
@@ -195,25 +215,25 @@
       });
     }
     var toolBtns = {};
-    [["↖", "Select / move", null], ["╱", "Trend line", "trend"], ["―", "Horizontal line", "hline"],
-     ["▭", "Rectangle", "rect"], ["F", "Fibonacci retracement", "fib"], ["T", "Text", "text"]].forEach(function (t) {
+    [[ICONS.cursor, "Select / move", null], [ICONS.trend, "Trend line", "trend"], [ICONS.hline, "Horizontal line", "hline"],
+     [ICONS.rect, "Rectangle", "rect"], [ICONS.fib, "Fibonacci retracement", "fib"], [ICONS.text, "Text", "text"]].forEach(function (t) {
       toolBtns[t[2] || "cursor"] = btn(t[0], t[1], function (b) { self.setTool(t[2]); mark(t[2] ? b : toolBtns.cursor); });
     });
     mark(toolBtns.cursor);
     this.onToolDone(function () { mark(toolBtns.cursor); });
-    btn("✕", "Delete selected (Del)", function () { self.deleteSelected(); });
+    btn(ICONS.trash, "Delete selected (Del)", function () { self.deleteSelected(); });
     var sep = document.createElement("div");
     sep.style.cssText = "height:1px;background:" + o.separatorColor + ";margin:3px 2px;";
     rail.appendChild(sep);
-    btn("≡", "Indicators", function () { self._toggleIndPanel(); });
-    var TYPES = ["candles", "bars", "line", "area"], TYPE_ICONS = { candles: "┆", bars: "‖", line: "╱", area: "◩" };
-    btn(TYPE_ICONS.candles, "Chart type", function (b) {
+    btn(ICONS.ind, "Indicators", function () { self._toggleIndPanel(); });
+    var TYPES = ["candles", "bars", "line", "area", "baseline"];
+    btn(ICONS.candles, "Chart type", function (b) {
       var next = TYPES[(TYPES.indexOf(self.chartType) + 1) % TYPES.length];
       self.setChartType(next);
-      b.textContent = TYPE_ICONS[next];
+      b.innerHTML = ICONS[next];
       b.title = "Chart type: " + next;
     });
-    btn("◉", "Screenshot (PNG)", function () { self.snapshot(); });
+    btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
     this.el.appendChild(rail);
     this._rail = rail;
   };
@@ -587,7 +607,7 @@
   };
   Chart.prototype.getIndicators = function () { return this.indicators.slice(); };
   Chart.prototype.setChartType = function (t) {
-    if (["candles", "bars", "line", "area"].indexOf(t) < 0) return;
+    if (["candles", "bars", "line", "area", "baseline"].indexOf(t) < 0) return;
     this.chartType = t;
     this._paint();
   };
@@ -864,7 +884,47 @@
 
     var half = Math.max(0.5, this.barSpacing * 0.35);
     var ct = this.chartType;
-    if (ct === "line" || ct === "area") {
+    if (ct === "baseline") {
+      // Above the base is up-territory, below is down — the base is the
+      // dataset's first close, so it stays put while panning.
+      var baseV = this.bars.length ? this.bars[0].close : 0;
+      var baseY = clamp(pp.toY(baseV), pp.y0, pp.y0 + pp.h);
+      var seg = [];
+      for (i = lo; i <= hi; i++) {
+        b = this.bars[i]; if (!b) continue;
+        seg.push([this.indexToX(i), pp.toY(b.close)]);
+      }
+      if (seg.length > 1) {
+        var passes = [
+          { clipY0: pp.y0, clipH: baseY - pp.y0, stroke: o.upColor, fillA: "rgba(0,217,126,0.22)", fillB: "rgba(0,217,126,0)" },
+          { clipY0: baseY, clipH: pp.y0 + pp.h - baseY, stroke: o.downColor, fillA: "rgba(248,81,73,0)", fillB: "rgba(248,81,73,0.22)" },
+        ];
+        for (var pi2 = 0; pi2 < passes.length; pi2++) {
+          var ps = passes[pi2];
+          if (ps.clipH <= 0) continue;
+          c.save();
+          c.beginPath(); c.rect(0, ps.clipY0, W, ps.clipH); c.clip();
+          c.beginPath();
+          c.moveTo(seg[0][0], seg[0][1]);
+          for (i = 1; i < seg.length; i++) c.lineTo(seg[i][0], seg[i][1]);
+          var grB = c.createLinearGradient(0, pp.y0, 0, pp.y0 + pp.h);
+          grB.addColorStop(0, ps.fillA);
+          grB.addColorStop(1, ps.fillB);
+          c.lineTo(seg[seg.length - 1][0], baseY); c.lineTo(seg[0][0], baseY); c.closePath();
+          c.fillStyle = grB;
+          c.fill();
+          c.beginPath();
+          c.moveTo(seg[0][0], seg[0][1]);
+          for (i = 1; i < seg.length; i++) c.lineTo(seg[i][0], seg[i][1]);
+          c.strokeStyle = ps.stroke; c.lineWidth = 1.6;
+          c.stroke();
+          c.restore();
+        }
+        c.strokeStyle = o.textColor; c.lineWidth = 1; c.setLineDash([3, 3]);
+        c.beginPath(); c.moveTo(0, Math.round(baseY) + 0.5); c.lineTo(W, Math.round(baseY) + 0.5); c.stroke();
+        c.setLineDash([]);
+      }
+    } else if (ct === "line" || ct === "area") {
       c.save();
       c.beginPath(); c.rect(0, pp.y0, W, pp.h); c.clip();
       c.strokeStyle = o.upColor; c.lineWidth = 1.6;
@@ -1322,7 +1382,7 @@
   };
 
   global.TRCharts = {
-    version: "0.7.0",
+    version: "0.8.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
