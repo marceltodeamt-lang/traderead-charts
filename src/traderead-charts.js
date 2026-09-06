@@ -925,7 +925,10 @@
     var last = n ? this.bars[n - 1] : null;
     var prev = n > 1 ? this.bars[n - 2] : null;
     var px = last ? fmtPrice(last.close, last.close >= 1000 ? 2 : 4) : "";
-    var chg = last && prev ? (last.close - prev.close) / prev.close * 100 : null;
+    // change is measured from the previous SESSION close when the host gives
+    // us one (quote-screen semantics), else from the previous bar
+    var base = isNum(this._prevCloseOverride) ? this._prevCloseOverride : (prev ? prev.close : null);
+    var chg = last && base ? (last.close - base) / base * 100 : null;
     var up = chg !== null && chg >= 0;
     this._header.innerHTML =
       '<span style="color:' + (o.tagText || "#e6edf3") + ';font-size:17px;">' + (inf.ticker || "") + "</span>" +
@@ -2061,7 +2064,7 @@
   }
 
   global.TRCharts = {
-    version: "0.19.0",
+    version: "0.20.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
