@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.17.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.18.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key

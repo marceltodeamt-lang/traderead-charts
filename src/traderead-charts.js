@@ -264,13 +264,18 @@
     fsBtn.addEventListener("mouseenter", function () { fsBtn.style.background = "rgba(99,102,241,0.4)"; });
     fsBtn.addEventListener("mouseleave", function () { fsBtn.style.background = "rgba(99,102,241,0.22)"; });
     fsBtn.addEventListener("click", function () {
-      if (document.fullscreenElement === self.el) document.exitFullscreen();
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (fsEl === self.el) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
       else if (self.el.requestFullscreen) self.el.requestFullscreen();
+      else if (self.el.webkitRequestFullscreen) self.el.webkitRequestFullscreen();
+      // iOS Safari has no element fullscreen: the host page should maximize
+      // the container instead (the production widget does exactly that).
     });
     document.addEventListener("fullscreenchange", function () {
       fsBtn.innerHTML = document.fullscreenElement === self.el ? fsExit : fsIcon;
     });
     this.el.appendChild(fsBtn);
+    this._fsBtn = fsBtn;
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
@@ -445,10 +450,31 @@
     var out = document.createElement("canvas");
     out.width = this.canvas.width; out.height = this.canvas.height;
     var c = out.getContext("2d");
+    var dpr = out.width / Math.max(1, this.w);
     c.fillStyle = this.opt.background;
     c.fillRect(0, 0, out.width, out.height);
     c.drawImage(this.canvas, 0, 0);
     c.drawImage(this.drawCanvas, 0, 0);
+    // header + mark are DOM, invisible to canvases — draw them into the file
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var inf = this._symbolInfo || {};
+    var n = this.bars.length, last = n ? this.bars[n - 1] : null;
+    if (inf.ticker || last) {
+      c.font = "800 15px -apple-system, 'Segoe UI', sans-serif";
+      var x = 12;
+      if (inf.ticker) { c.fillStyle = this.opt.tagText; c.fillText(inf.ticker, x, 22); x += c.measureText(inf.ticker).width + 8; }
+      if (inf.tf) { c.font = "700 11px -apple-system, sans-serif"; c.fillStyle = this.opt.textColor; c.fillText(inf.tf, x, 22); x += c.measureText(inf.tf).width + 8; }
+      if (last) {
+        c.font = "800 15px -apple-system, sans-serif";
+        c.fillStyle = last.close >= last.open ? this.opt.upColor : this.opt.downColor;
+        c.fillText(fmtPrice(last.close, last.close >= 1000 ? 2 : 4), x, 22);
+      }
+    }
+    c.font = "800 12px -apple-system, sans-serif";
+    c.fillStyle = this.opt.textColor;
+    c.save(); c.globalAlpha = 0.75;
+    c.fillText("TradeRead", 12, this._plotH() - 8);
+    c.restore();
     return out;
   };
   // Share: the native sheet where it exists (phones), clipboard otherwise —
@@ -1066,8 +1092,8 @@
         "border-radius:10px;padding:5px 7px;box-shadow:0 6px 20px rgba(0,0,0,0.35);";
       chip.innerHTML =
         '<input type="color" title="Color" style="width:22px;height:22px;padding:0;border:none;border-radius:6px;background:none;cursor:pointer;">' +
-        '<button type="button" data-act="del" title="Delete (Del)" style="border:none;background:none;color:' + o.textColor + ';cursor:pointer;width:22px;height:22px;font:700 13px -apple-system,sans-serif;line-height:1;">' +
-        SVGI('<line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>') + "</button>";
+        '<button type="button" data-act="del" title="Delete drawing (Del)" style="border:none;background:none;color:' + o.downColor + ';cursor:pointer;width:22px;height:22px;font:700 13px -apple-system,sans-serif;line-height:1;">' +
+        SVGI('<path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13 H10.8 L11.5 4.5 M7 7 V10.5 M9 7 V10.5"/>') + "</button>";
       chip.querySelector("input").addEventListener("input", function () {
         var sel2 = null;
         for (var j = 0; j < self.drawings.length; j++) if (self.drawings[j].id === self._selected) sel2 = self.drawings[j];
@@ -1111,6 +1137,7 @@
   Chart.prototype.loadDrawings = function (json) {
     try { this.drawings = (typeof json === "string" ? JSON.parse(json) : json) || []; } catch (e) { this.drawings = []; }
     this._selected = null;
+    this._syncStyleChip();
     this._paintDrawings();
   };
   Chart.prototype.setPersistKey = function (key) {
@@ -1228,7 +1255,21 @@
     }
     return null;
   };
-  Chart.prototype.applyOptions = function (o) { Object.assign(this.opt, o || {}); this.el.style.background = this.opt.background; this._paint(); };
+  Chart.prototype.applyOptions = function (o) {
+    Object.assign(this.opt, o || {});
+    this.el.style.background = this.opt.background;
+    // the mounted chrome carries colors from mount time — remount it in the
+    // new palette (open panels close; their state is one click away)
+    if (this._rail) {
+      ["_rail", "_indPanel", "_typeMenu", "_styleChip", "_searchBox", "_fsBtn"].forEach(function (k) {
+        if (this[k]) { this[k].remove(); this[k] = null; }
+      }, this);
+      this._mountUI();
+      this._syncStyleChip();
+    }
+    this._paintHeader();
+    this._paint();
+  };
   Chart.prototype.scrollToRealtime = function () { this.rightIndex = this.bars.length - 1; this._paint(); };
   // Fit: back to the default frame — bar spacing, right edge and vertical
   // zoom all reset (the production widget's refit, whole-chart edition).
@@ -1990,7 +2031,7 @@
   }
 
   global.TRCharts = {
-    version: "0.17.1",
+    version: "0.18.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
