@@ -201,6 +201,8 @@
     baseline: SVGI('<line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="2 2"/><path d="M2.5 10.5 L6 5.5 L9 9 L13.5 4"/>'),
     hollow: SVGI('<line x1="5" y1="2.5" x2="5" y2="13.5"/><rect x="3.4" y="5" width="3.2" height="5" rx="0.6"/><line x1="11" y1="2.5" x2="11" y2="13.5"/><rect x="9.4" y="4" width="3.2" height="6.5" fill="currentColor" stroke="none" rx="0.6"/>'),
     heikin: SVGI('<rect x="2.8" y="6" width="3.4" height="6" rx="1.6"/><rect x="9.8" y="3.5" width="3.4" height="6" rx="1.6" fill="currentColor" stroke="none"/>'),
+    share: SVGI('<path d="M8 10 V2.8 M5.5 5 L8 2.5 L10.5 5"/><path d="M4 8.5 H3 V13.5 H13 V8.5 H12"/>'),
+    fit: SVGI('<path d="M6 2.5 V6 H2.5 M13.5 6 H10 V2.5 M10 13.5 V10 H13.5 M2.5 10 H6 V13.5"/>'),
   };
   var TYPE_LIST = [
     ["candles", "Candles"], ["hollow", "Hollow candles"], ["heikin", "Heikin Ashi"],
@@ -242,6 +244,8 @@
     var typeBtn = btn(ICONS.candles, "Chart type", function () { self._toggleTypeMenu(typeBtn); });
     this._typeBtn = typeBtn;
     btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
+    btn(ICONS.share, "Share chart", function (b) { self.share(b); });
+    btn(ICONS.fit, "Fit chart", function () { self.fit(); });
     this.el.appendChild(rail);
     this._rail = rail;
 
@@ -250,9 +254,14 @@
     var fsExit = SVGI('<path d="M6 2.5 V6 H2.5 M13.5 6 H10 V2.5 M10 13.5 V10 H13.5 M2.5 10 H6 V13.5"/>');
     var fsBtn = document.createElement("button");
     fsBtn.type = "button"; fsBtn.title = "Fullscreen"; fsBtn.innerHTML = fsIcon;
-    fsBtn.style.cssText = "position:absolute;right:8px;bottom:" + (o.timeAxisHeight + 8) + "px;z-index:6;" +
-      "width:28px;height:28px;border:1px solid " + o.separatorColor + ";border-radius:8px;background:" + o.background + ";" +
-      "color:" + o.textColor + ";cursor:pointer;display:flex;align-items:center;justify-content:center;";
+    // visibly a button, not axis furniture (owner: nobody would find the
+    // faint one): accent tint, larger hit area, brightens on hover
+    fsBtn.style.cssText = "position:absolute;right:10px;bottom:" + (o.timeAxisHeight + 10) + "px;z-index:6;" +
+      "width:34px;height:34px;border:1px solid rgba(129,140,248,0.55);border-radius:10px;" +
+      "background:rgba(99,102,241,0.22);color:" + o.tagText + ";cursor:pointer;" +
+      "display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.25);";
+    fsBtn.addEventListener("mouseenter", function () { fsBtn.style.background = "rgba(99,102,241,0.4)"; });
+    fsBtn.addEventListener("mouseleave", function () { fsBtn.style.background = "rgba(99,102,241,0.22)"; });
     fsBtn.addEventListener("click", function () {
       if (document.fullscreenElement === self.el) document.exitFullscreen();
       else if (self.el.requestFullscreen) self.el.requestFullscreen();
@@ -339,17 +348,37 @@
     this._indPanel = p;
   };
 
+  Chart.prototype._composite = function () {
+    var out = document.createElement("canvas");
+    out.width = this.canvas.width; out.height = this.canvas.height;
+    var c = out.getContext("2d");
+    c.fillStyle = this.opt.background;
+    c.fillRect(0, 0, out.width, out.height);
+    c.drawImage(this.canvas, 0, 0);
+    c.drawImage(this.drawCanvas, 0, 0);
+    return out;
+  };
+  // Share: the native sheet where it exists (phones), clipboard otherwise —
+  // same intent as the production widget's share button.
+  Chart.prototype.share = function (btnEl) {
+    var self = this;
+    this._composite().toBlob(function (blob) {
+      var file = new File([blob], "traderead-chart.png", { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: "TradeRead chart" }).catch(function () {});
+      } else if (navigator.clipboard && window.ClipboardItem) {
+        navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(function () {
+          if (btnEl) { var t = btnEl.title; btnEl.title = "Copied to clipboard"; setTimeout(function () { btnEl.title = t; }, 1500); }
+        }).catch(function () { self.snapshot(); });
+      } else self.snapshot();
+    });
+  };
+
   // PNG snapshot. Nothing downloads by itself (owner, 7 Sep 2026): the
   // camera opens a preview with explicit Download / Copy / Close actions.
   Chart.prototype.snapshot = function (filename) {
     var self = this, o = this.opt;
-    var out = document.createElement("canvas");
-    out.width = this.canvas.width; out.height = this.canvas.height;
-    var c = out.getContext("2d");
-    c.fillStyle = o.background;
-    c.fillRect(0, 0, out.width, out.height);
-    c.drawImage(this.canvas, 0, 0);
-    c.drawImage(this.drawCanvas, 0, 0);
+    var out = this._composite();
     if (this._snapModal) this._snapModal.remove();
     var wrap = document.createElement("div");
     wrap.className = "trc-snap";
@@ -964,6 +993,14 @@
   };
   Chart.prototype.applyOptions = function (o) { Object.assign(this.opt, o || {}); this.el.style.background = this.opt.background; this._paint(); };
   Chart.prototype.scrollToRealtime = function () { this.rightIndex = this.bars.length - 1; this._paint(); };
+  // Fit: back to the default frame — bar spacing, right edge and vertical
+  // zoom all reset (the production widget's refit, whole-chart edition).
+  Chart.prototype.fit = function () {
+    this.barSpacing = this.opt.barSpacing;
+    this.rightIndex = this.bars.length - 1;
+    this._vZoom = 1;
+    this._paint();
+  };
   Chart.prototype.remove = function () { this._ro.disconnect(); this.el.innerHTML = ""; };
 
   // ── Painting ─────────────────────────────────────────────────────────
@@ -1652,7 +1689,7 @@
   };
 
   global.TRCharts = {
-    version: "0.10.0",
+    version: "0.11.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
