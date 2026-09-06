@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.6.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.7.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -19,6 +19,15 @@ to (time, price) because lazy history prepends bars and shifts indices;
 the price pane autoscales from bars alone so a distant EMA cannot squash
 the candles; persisted JSON strips cached text widths; Delete never
 fires while a form field has focus.
+
+## The plus over a bare engine
+
+`ui: true` (the default) mounts the complete widget, not just a canvas:
+the drawing rail, a TradingView-style indicator panel (any number of
+EMAs/SMAs, VWAP, Bollinger, RSI, MACD, Stochastic — add, remove, edit
+params, all persisted per key), a chart-type switcher (candles, OHLC
+bars, line, area) and a one-click PNG snapshot. Hosts that want only the
+engine pass `ui: false` and drive the same APIs themselves.
 
 ## Quick start
 
@@ -38,7 +47,7 @@ fires while a form field has focus.
 - [x] Drawing set with selection, move, resize, persistence
 - [x] Light theme palette
 - [x] Draggable pane separators (mouse and touch)
-- [ ] Area/baseline/bar series types
+- [x] Line / area / OHLC-bar chart types (baseline pending)
 - [ ] Markers, per-bar coloring API
 - [ ] Kinetic scroll feel tuning; pinch anchor refinement
 - [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates

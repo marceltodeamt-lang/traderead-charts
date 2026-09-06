@@ -7,47 +7,28 @@
 <style>
   :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: rgba(139,148,158,0.25); }
   body.light { --bg: #ffffff; --fg: #131722; --muted: #5f6b7c; --line: rgba(42,46,57,0.25); }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px -apple-system, "Segoe UI", sans-serif; transition: background 0.15s; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px -apple-system, "Segoe UI", sans-serif; }
   header { padding: 12px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   h1 { font-size: 15px; margin: 0 8px 0 0; }
   .grp { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
   button { border: none; background: none; color: var(--muted); font: 700 12px inherit; padding: 5px 9px; border-radius: 7px; cursor: pointer; }
   button.on { background: rgba(99,102,241,0.25); color: var(--fg); }
-  label.ind { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 9px; padding: 5px 8px; cursor: pointer; }
-  label.ind input[type="checkbox"] { accent-color: #6366f1; }
-  label.ind input[type="number"] { width: 40px; background: none; border: 1px solid var(--line); border-radius: 5px; color: var(--fg); font: inherit; padding: 1px 3px; }
-  #chart { width: 100%; height: 620px; }
+  #chart { width: 100%; height: 640px; }
   #readout { padding: 8px 18px; color: var(--muted); font: 12px ui-monospace, Menlo, monospace; min-height: 18px; }
+  .hint { padding: 0 18px 10px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.6</h1>
+  <h1>TradeRead Charts v0.7</h1>
   <div class="grp" id="tfs"></div>
-  <label class="ind"><input type="checkbox" id="iEma" checked> EMA <input type="number" id="pEma1" value="20" min="2" max="400"> / <input type="number" id="pEma2" value="50" min="2" max="400"></label>
-  <label class="ind"><input type="checkbox" id="iRsi" checked> RSI <input type="number" id="pRsi" value="14" min="2" max="100"></label>
-  <label class="ind"><input type="checkbox" id="iMacd" checked> MACD 12/26/9</label>
-  <label class="ind"><input type="checkbox" id="iStoch"> Stoch <input type="number" id="pStK" value="14" min="2" max="100">/<input type="number" id="pStD" value="3" min="1" max="50">/<input type="number" id="pStS" value="3" min="1" max="50"></label>
-  <label class="ind"><input type="checkbox" id="iVwap"> VWAP</label>
-  <label class="ind"><input type="checkbox" id="iBb"> BB <input type="number" id="pBb" value="20" min="2" max="200">/<input type="number" id="pBbM" value="2" min="1" max="5" step="0.5"></label>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
-<div style="position:relative;">
-  <div id="rail" style="position:absolute;left:8px;top:10px;z-index:5;display:flex;flex-direction:column;gap:4px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:4px;">
-    <button data-tool="" class="on" title="Cursor">&#8598;</button>
-    <button data-tool="trend" title="Trend line">&#9585;</button>
-    <button data-tool="hline" title="Horizontal line">&#8213;</button>
-    <button data-tool="rect" title="Rectangle">&#9645;</button>
-    <button data-tool="fib" title="Fibonacci retracement">F</button>
-    <button data-tool="text" title="Text">T</button>
-    <button id="delSel" title="Delete selected (Del)">&#10005;</button>
-  </div>
-  <div id="chart"></div>
-</div>
+<p class="hint">Uneltele de desen, indicatorii (≡), tipul de chart și camera sunt ÎN bibliotecă — pagina asta doar creează chartul.</p>
+<div id="chart"></div>
 <div id="readout"></div>
 <script src="../src/traderead-charts.js"></script>
 <script>
-  // ── synthetic data per timeframe ──────────────────────────────────────
   var TFS = [["1m",60],["5m",300],["15m",900],["1H",3600],["4H",14400],["1D",86400],["1W",604800]];
   var tfSec = 3600, bars = [];
   function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var v = Math.imul(seed ^ seed >>> 15, 1 | seed); v = v + Math.imul(v ^ v >>> 7, 61 | v) ^ v; return ((v ^ v >>> 14) >>> 0) / 4294967296; }; }
@@ -65,135 +46,22 @@
     return out;
   }
 
-  // ── indicator math (caller-owned, like in production) ─────────────────
-  function emaSeries(period) {
-    var k = 2 / (period + 1), out = [], prev = null;
-    bars.forEach(function (b) { prev = prev === null ? b.close : b.close * k + prev * (1 - k); out.push({ time: b.time, value: prev }); });
-    return out;
-  }
-  function rsiSeries(period) {
-    var out = [], gain = 0, loss = 0, i, ch;
-    for (i = 1; i < bars.length; i++) {
-      ch = bars[i].close - bars[i - 1].close;
-      if (i <= period) { gain += Math.max(ch, 0); loss += Math.max(-ch, 0); }
-      if (i === period) { gain /= period; loss /= period; }
-      else if (i > period) {
-        gain = (gain * (period - 1) + Math.max(ch, 0)) / period;
-        loss = (loss * (period - 1) + Math.max(-ch, 0)) / period;
-      }
-      if (i >= period) out.push({ time: bars[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
-    }
-    return out;
-  }
-  function emaOf(values, period) {
-    var k = 2 / (period + 1), out = [], prev = null;
-    values.forEach(function (v) { prev = prev === null ? v.value : v.value * k + prev * (1 - k); out.push({ time: v.time, value: prev }); });
-    return out;
-  }
-  function macdSeries(f, sl, sig) {
-    var closes = bars.map(function (b) { return { time: b.time, value: b.close }; });
-    var ef = emaOf(closes, f), es = emaOf(closes, sl);
-    var line = ef.map(function (x, i) { return { time: x.time, value: x.value - es[i].value }; }).slice(sl - 1);
-    var signal = emaOf(line, sig);
-    var hist = line.map(function (x, i) { return { time: x.time, value: x.value - signal[i].value }; });
-    return { line: line, signal: signal, hist: hist };
-  }
-  function smaOf(values, period) {
-    var out = [], sum = 0;
-    for (var i = 0; i < values.length; i++) {
-      sum += values[i].value;
-      if (i >= period) sum -= values[i - period].value;
-      if (i >= period - 1) out.push({ time: values[i].time, value: sum / period });
-    }
-    return out;
-  }
-  // Session VWAP: resets at each UTC day open, like the production widget.
-  function vwapSeries() {
-    var out = [], pv = 0, vol = 0, day = null;
-    bars.forEach(function (b) {
-      var d = Math.floor(b.time / 86400);
-      if (d !== day) { day = d; pv = 0; vol = 0; }
-      var typ = (b.high + b.low + b.close) / 3;
-      pv += typ * (b.volume || 1); vol += (b.volume || 1);
-      out.push({ time: b.time, value: pv / vol });
-    });
-    return out;
-  }
-  function bbSeries(period, mult) {
-    var mid = [], up = [], lo = [], win = [];
-    bars.forEach(function (b) {
-      win.push(b.close);
-      if (win.length > period) win.shift();
-      if (win.length === period) {
-        var m = win.reduce(function (a, x) { return a + x; }, 0) / period;
-        var sd = Math.sqrt(win.reduce(function (a, x) { return a + (x - m) * (x - m); }, 0) / period);
-        mid.push({ time: b.time, value: m });
-        up.push({ time: b.time, value: m + mult * sd });
-        lo.push({ time: b.time, value: m - mult * sd });
-      }
-    });
-    return { mid: mid, up: up, lo: lo };
-  }
-  function stochSeries(kP, dP, smooth) {
-    var raw = [];
-    for (var i = kP - 1; i < bars.length; i++) {
-      var hh = -Infinity, ll = Infinity;
-      for (var j = i - kP + 1; j <= i; j++) { if (bars[j].high > hh) hh = bars[j].high; if (bars[j].low < ll) ll = bars[j].low; }
-      raw.push({ time: bars[i].time, value: hh === ll ? 50 : (bars[i].close - ll) / (hh - ll) * 100 });
-    }
-    var k = smooth > 1 ? smaOf(raw, smooth) : raw;
-    return { k: k, d: smaOf(k, dP) };
-  }
-
-  // ── chart + rebuild-on-config (panes are cheap, math is the caller's) ──
   var chart = TRCharts.createChart(document.getElementById("chart"));
-  function val(id) { return parseInt(document.getElementById(id).value, 10); }
-  function on(id) { return document.getElementById(id).checked; }
-  function rebuild() {
-    chart.removeOscPanes();
-    ["ema1","ema2","vwap","bbU","bbM","bbL"].forEach(function (id) { chart.removeLine(id); });
+  function load() {
+    bars = genBars();
     chart.setData(bars);
-    chart.setPersistKey("trc-demo:" + tfSec);   // desenele persista per timeframe
-    if (on("iEma")) {
-      chart.addLine("ema1", emaSeries(val("pEma1") || 20), "#f0b429", 1.4);
-      chart.addLine("ema2", emaSeries(val("pEma2") || 50), "#58a6ff", 1.4);
-    }
-    if (on("iVwap")) chart.addLine("vwap", vwapSeries(), "#e879f9", 1.4);
-    if (on("iBb")) {
-      var bb = bbSeries(val("pBb") || 20, parseFloat(document.getElementById("pBbM").value) || 2);
-      chart.addLine("bbU", bb.up, "rgba(100,116,139,0.8)", 1);
-      chart.addLine("bbM", bb.mid, "rgba(100,116,139,0.5)", 1);
-      chart.addLine("bbL", bb.lo, "rgba(100,116,139,0.8)", 1);
-    }
-    var pane = 1;
-    if (on("iRsi")) {
-      chart.addLine("rsi", rsiSeries(val("pRsi") || 14), "#c084fc", 1.4, pane);
-      chart.addGuide(pane, 70, "rgba(248,81,73,0.5)");
-      chart.addGuide(pane, 30, "rgba(0,217,126,0.5)");
-      pane++;
-    }
-    if (on("iMacd")) {
-      var m = macdSeries(12, 26, 9);
-      chart.addHistogram("macdH", m.hist, pane);
-      chart.addLine("macd", m.line, "#58a6ff", 1.2, pane);
-      chart.addLine("macdSig", m.signal, "#f0b429", 1.2, pane);
-      chart.addGuide(pane, 0, "rgba(139,148,158,0.4)");
-      pane++;
-    }
-    if (on("iStoch")) {
-      var st = stochSeries(val("pStK") || 14, val("pStD") || 3, val("pStS") || 3);
-      chart.addLine("stochK", st.k, "#58a6ff", 1.2, pane);
-      chart.addLine("stochD", st.d, "#f0b429", 1.2, pane);
-      chart.addGuide(pane, 80, "rgba(248,81,73,0.5)");
-      chart.addGuide(pane, 20, "rgba(0,217,126,0.5)");
-      pane++;
+    chart.setPersistKey("trc-demo:" + tfSec);
+    // fara nimic salvat: pornim cu setul standard al widgetului de productie
+    if (!chart.getIndicators().length && !localStorage.getItem("trc-demo:" + tfSec + ":ind")) {
+      chart.addIndicator("ema", { p: 9 }, "#00d97e");
+      chart.addIndicator("ema", { p: 20 }, "#f0b429");
+      chart.addIndicator("ema", { p: 50 }, "#58a6ff");
+      chart.addIndicator("ema", { p: 200 }, "#f85149");
+      chart.addIndicator("rsi", { p: 14 }, "#c084fc");
+      chart.addIndicator("macd");
     }
   }
-  ["iEma","pEma1","pEma2","iRsi","pRsi","iMacd","iStoch","pStK","pStD","pStS","iVwap","iBb","pBb","pBbM"].forEach(function (id) {
-    document.getElementById(id).addEventListener("change", rebuild);
-  });
 
-  // timeframes
   var tfBar = document.getElementById("tfs");
   TFS.forEach(function (tf) {
     var b = document.createElement("button");
@@ -202,34 +70,25 @@
     b.addEventListener("click", function () {
       tfSec = tf[1];
       tfBar.querySelectorAll("button").forEach(function (x) { x.className = x === b ? "on" : ""; });
-      bars = genBars();
-      rebuild();
+      load();
     });
     tfBar.appendChild(b);
   });
 
-  // theme
   document.getElementById("tDark").addEventListener("click", function () {
     document.body.classList.remove("light");
     this.className = "on"; document.getElementById("tLight").className = "";
-    chart.applyOptions(Object.assign({}, TRCharts.themes.light, invert(TRCharts.themes.light)));
-    chart.applyOptions(darkReset());
+    chart.applyOptions({ background: "#0d1117", textColor: "#8b949e", gridColor: "rgba(139,148,158,0.12)",
+      separatorColor: "rgba(139,148,158,0.25)", crosshair: "rgba(139,148,158,0.45)",
+      tagBg: "#2a2e39", tagText: "#e6edf3", volumeUp: "rgba(0,217,126,0.35)", volumeDown: "rgba(248,81,73,0.35)",
+      upColor: "#00d97e", downColor: "#f85149", wickUp: "#00d97e", wickDown: "#f85149" });
   });
   document.getElementById("tLight").addEventListener("click", function () {
     document.body.classList.add("light");
     this.className = "on"; document.getElementById("tDark").className = "";
     chart.applyOptions(TRCharts.themes.light);
   });
-  function darkReset() {
-    // themes.dark is empty (defaults ARE dark); reapply the default keys we touch
-    return { background: "#0d1117", textColor: "#8b949e", gridColor: "rgba(139,148,158,0.12)",
-      separatorColor: "rgba(139,148,158,0.25)", crosshair: "rgba(139,148,158,0.45)",
-      tagBg: "#2a2e39", tagText: "#e6edf3", volumeUp: "rgba(0,217,126,0.35)", volumeDown: "rgba(248,81,73,0.35)",
-      upColor: "#00d97e", downColor: "#f85149", wickUp: "#00d97e", wickDown: "#f85149" };
-  }
-  function invert() { return {}; }
 
-  // crosshair readout + live ticks
   chart.onCrosshair(function (info) {
     document.getElementById("readout").textContent = info
       ? "bar " + info.index + " · O " + info.bar.open.toFixed(0) + " H " + info.bar.high.toFixed(0) +
@@ -246,23 +105,7 @@
     chart.update(b);
   }, 900);
 
-  // drawing rail
-  var railBtns = document.querySelectorAll("#rail button[data-tool]");
-  function railPaint(active) {
-    railBtns.forEach(function (b) { b.className = (b.getAttribute("data-tool") || "") === active ? "on" : ""; });
-  }
-  railBtns.forEach(function (b) {
-    b.addEventListener("click", function () {
-      var t = b.getAttribute("data-tool") || null;
-      chart.setTool(t);
-      railPaint(t || "");
-    });
-  });
-  chart.onToolDone(function () { railPaint(""); });
-  document.getElementById("delSel").addEventListener("click", function () { chart.deleteSelected(); });
-
-  bars = genBars();
-  rebuild();
+  load();
 </script>
 </body>
 </html>

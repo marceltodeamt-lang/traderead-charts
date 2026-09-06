@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.6.0
+ * TradeRead Charts v0.7.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -33,6 +33,7 @@
     oscPaneHeight: 110,       // default px height of an oscillator pane
     minPricePaneFrac: 0.45,   // price pane never shrinks below this share
     logo: true,
+    ui: true,               // the bundled rail + indicator panel + type switcher + camera
   };
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -136,6 +137,9 @@
     this._persistKey = null;
     this._saveT = null;
     this._sepDrag = null;           // {i, y0, h0} while a pane separator is dragged
+    this.indicators = [];           // built-in indicator list (see addIndicator)
+    this._indColor = 0;
+    this.chartType = "candles";     // "candles" | "bars" | "line" | "area"
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = 0;
     this.crosshairCb = null;
@@ -157,12 +161,123 @@
     this.octx = this.overlay.getContext("2d");
 
     if (this.opt.logo) this._mountLogo();
+    if (this.opt.ui) this._mountUI();
 
     this._ro = new ResizeObserver(function () { self._resize(); });
     this._ro.observe(container);
     this._resize();
     this._bind();
   }
+
+
+  // ── Bundled UI: the plus over the bare engine ────────────────────────
+  // ui: true (default) mounts the production-style rail: drawing tools,
+  // the TradingView-style indicator panel (many EMAs, SMA, add/remove,
+  // editable params), the chart-type switcher and a PNG camera.
+  Chart.prototype._mountUI = function () {
+    var self = this, o = this.opt;
+    var rail = document.createElement("div");
+    rail.className = "trc-rail";
+    rail.style.cssText = "position:absolute;left:8px;top:10px;z-index:6;display:flex;flex-direction:column;gap:3px;" +
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:10px;padding:4px;";
+    function btn(label, tip, fn) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = label; b.title = tip;
+      b.style.cssText = "border:none;background:none;color:" + o.textColor + ";width:26px;height:26px;" +
+        "border-radius:7px;cursor:pointer;font:700 13px -apple-system,'Segoe UI',sans-serif;line-height:1;";
+      b.addEventListener("click", function () { fn(b); });
+      rail.appendChild(b);
+      return b;
+    }
+    function mark(active) {
+      rail.querySelectorAll("button").forEach(function (b) {
+        b.style.background = b === active ? "rgba(99,102,241,0.3)" : "none";
+      });
+    }
+    var toolBtns = {};
+    [["↖", "Select / move", null], ["╱", "Trend line", "trend"], ["―", "Horizontal line", "hline"],
+     ["▭", "Rectangle", "rect"], ["F", "Fibonacci retracement", "fib"], ["T", "Text", "text"]].forEach(function (t) {
+      toolBtns[t[2] || "cursor"] = btn(t[0], t[1], function (b) { self.setTool(t[2]); mark(t[2] ? b : toolBtns.cursor); });
+    });
+    mark(toolBtns.cursor);
+    this.onToolDone(function () { mark(toolBtns.cursor); });
+    btn("✕", "Delete selected (Del)", function () { self.deleteSelected(); });
+    var sep = document.createElement("div");
+    sep.style.cssText = "height:1px;background:" + o.separatorColor + ";margin:3px 2px;";
+    rail.appendChild(sep);
+    btn("≡", "Indicators", function () { self._toggleIndPanel(); });
+    var TYPES = ["candles", "bars", "line", "area"], TYPE_ICONS = { candles: "┆", bars: "‖", line: "╱", area: "◩" };
+    btn(TYPE_ICONS.candles, "Chart type", function (b) {
+      var next = TYPES[(TYPES.indexOf(self.chartType) + 1) % TYPES.length];
+      self.setChartType(next);
+      b.textContent = TYPE_ICONS[next];
+      b.title = "Chart type: " + next;
+    });
+    btn("◉", "Screenshot (PNG)", function () { self.snapshot(); });
+    this.el.appendChild(rail);
+    this._rail = rail;
+  };
+
+  Chart.prototype._toggleIndPanel = function () {
+    var self = this, o = this.opt;
+    if (this._indPanel) { this._indPanel.remove(); this._indPanel = null; return; }
+    var p = document.createElement("div");
+    p.className = "trc-ind-panel";
+    p.style.cssText = "position:absolute;left:44px;top:10px;z-index:7;min-width:230px;max-height:70%;overflow:auto;" +
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:12px;padding:10px;" +
+      "color:" + o.textColor + ";font:12px -apple-system,'Segoe UI',sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.35);";
+    function repaint() {
+      var h = '<div style="font-weight:800;margin-bottom:8px;">Indicators</div>';
+      var list = self.getIndicators();
+      if (!list.length) h += '<div style="opacity:0.6;margin-bottom:8px;">None active.</div>';
+      list.forEach(function (ind) {
+        var def = IND_DEFS[ind.kind];
+        h += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;" data-row="' + ind.id + '">' +
+          '<span style="width:9px;height:9px;border-radius:3px;background:' + (ind.color || "#8b949e") + ';"></span>' +
+          '<span style="flex:1;">' + def.label + '</span>';
+        Object.keys(ind.params).forEach(function (k) {
+          h += '<input data-ind="' + ind.id + '" data-k="' + k + '" type="number" step="any" value="' + ind.params[k] + '" ' +
+            'style="width:42px;background:none;border:1px solid ' + o.separatorColor + ';border-radius:5px;color:inherit;font:inherit;padding:1px 3px;">';
+        });
+        h += '<button data-del="' + ind.id + '" style="border:none;background:none;color:inherit;cursor:pointer;opacity:0.7;font:inherit;">✕</button></div>';
+      });
+      h += '<div style="border-top:1px solid ' + o.separatorColor + ';margin:8px 0;"></div>';
+      Object.keys(IND_DEFS).forEach(function (kind) {
+        h += '<button data-add="' + kind + '" style="border:1px solid ' + o.separatorColor + ';background:none;color:inherit;' +
+          'cursor:pointer;font:inherit;border-radius:7px;padding:3px 8px;margin:2px 3px 2px 0;">+ ' + IND_DEFS[kind].label + '</button>';
+      });
+      p.innerHTML = h;
+      p.querySelectorAll("[data-add]").forEach(function (b) {
+        b.addEventListener("click", function () { self.addIndicator(b.getAttribute("data-add")); repaint(); });
+      });
+      p.querySelectorAll("[data-del]").forEach(function (b) {
+        b.addEventListener("click", function () { self.removeIndicator(b.getAttribute("data-del")); repaint(); });
+      });
+      p.querySelectorAll("input[data-ind]").forEach(function (inp) {
+        inp.addEventListener("change", function () {
+          var patch = {};
+          patch[inp.getAttribute("data-k")] = parseFloat(inp.value);
+          self.updateIndicator(inp.getAttribute("data-ind"), patch);
+        });
+      });
+    }
+    repaint();
+    this.el.appendChild(p);
+    this._indPanel = p;
+  };
+
+  // PNG export: every layer composited, on the chart's own background.
+  Chart.prototype.snapshot = function (filename) {
+    var out = document.createElement("canvas");
+    out.width = this.canvas.width; out.height = this.canvas.height;
+    var c = out.getContext("2d");
+    c.drawImage(this.canvas, 0, 0);
+    c.drawImage(this.drawCanvas, 0, 0);
+    var a = document.createElement("a");
+    a.download = filename || "traderead-chart.png";
+    a.href = out.toDataURL("image/png");
+    a.click();
+  };
 
   Chart.prototype._mountLogo = function () {
     // The mark is a LINK to traderead.ai — that is the licence's attribution
@@ -279,7 +394,8 @@
     // day-marks with clock times, daily and up never shows a clock.
     var n = this.bars.length;
     this._barSec = n > 1 ? Math.max(1, Math.round((this.bars[n - 1].time - this.bars[0].time) / (n - 1))) : 3600;
-    this._paint();
+    if (this.indicators.length) this._applyIndicators();
+    else this._paint();
   };
   Chart.prototype.update = function (bar) {
     var n = this.bars.length;
@@ -289,7 +405,8 @@
       this.bars.push(bar);
       if (atRight) this.rightIndex = this.bars.length - 1;
     }
-    this._paint();
+    if (this.indicators.length) this._applyIndicators();
+    else this._paint();
   };
   function toByTime(data) {
     var m = new Map();
@@ -324,6 +441,208 @@
     if (pn) { delete pn.lines[id]; delete pn.hists[id]; }
     this._paint();
   };
+
+  // ── Built-in indicators ──────────────────────────────────────────────
+  // The library ships batteries included: the caller can still push raw
+  // series, but add/remove/configure of the standard set is one call —
+  // and the bundled panel (ui: true) gives end users the TradingView-style
+  // workflow the production widget has: many EMAs, SMA, delete, params.
+  var IND_PALETTE = ["#00d97e", "#f0b429", "#58a6ff", "#f85149", "#c084fc", "#22d3ee", "#fb923c", "#a3e635"];
+  var IND_DEFS = {
+    ema:   { label: "EMA",        overlay: true,  params: { p: 20 } },
+    sma:   { label: "SMA",        overlay: true,  params: { p: 50 } },
+    vwap:  { label: "VWAP",       overlay: true,  params: {} },
+    bb:    { label: "Bollinger",  overlay: true,  params: { p: 20, mult: 2 } },
+    rsi:   { label: "RSI",        overlay: false, params: { p: 14 } },
+    macd:  { label: "MACD",       overlay: false, params: { f: 12, s: 26, sig: 9 } },
+    stoch: { label: "Stochastic", overlay: false, params: { k: 14, d: 3, s: 3 } },
+  };
+
+  function calcEMA(bars, period, key) {
+    var k = 2 / (period + 1), out = [], prev = null;
+    for (var i = 0; i < bars.length; i++) {
+      var v = key ? bars[i][key] : bars[i].close;
+      prev = prev === null ? v : v * k + prev * (1 - k);
+      out.push({ time: bars[i].time, value: prev });
+    }
+    return out;
+  }
+  function calcSMA(bars, period) {
+    var out = [], sum = 0;
+    for (var i = 0; i < bars.length; i++) {
+      sum += bars[i].close;
+      if (i >= period) sum -= bars[i - period].close;
+      if (i >= period - 1) out.push({ time: bars[i].time, value: sum / period });
+    }
+    return out;
+  }
+  function calcVWAP(bars) {
+    var out = [], pv = 0, vol = 0, day = null;
+    for (var i = 0; i < bars.length; i++) {
+      var b = bars[i], d = Math.floor(b.time / 86400);
+      if (d !== day) { day = d; pv = 0; vol = 0; }        // session reset at the UTC day open
+      var typ = (b.high + b.low + b.close) / 3;
+      pv += typ * (b.volume || 1); vol += (b.volume || 1);
+      out.push({ time: b.time, value: pv / vol });
+    }
+    return out;
+  }
+  function calcBB(bars, period, mult) {
+    var mid = [], up = [], lo = [], win = [];
+    for (var i = 0; i < bars.length; i++) {
+      win.push(bars[i].close);
+      if (win.length > period) win.shift();
+      if (win.length === period) {
+        var m = 0, j;
+        for (j = 0; j < period; j++) m += win[j];
+        m /= period;
+        var s2 = 0;
+        for (j = 0; j < period; j++) s2 += (win[j] - m) * (win[j] - m);
+        var sd = Math.sqrt(s2 / period);
+        mid.push({ time: bars[i].time, value: m });
+        up.push({ time: bars[i].time, value: m + mult * sd });
+        lo.push({ time: bars[i].time, value: m - mult * sd });
+      }
+    }
+    return { mid: mid, up: up, lo: lo };
+  }
+  function calcRSI(bars, period) {                        // Wilder smoothing
+    var out = [], gain = 0, loss = 0;
+    for (var i = 1; i < bars.length; i++) {
+      var ch = bars[i].close - bars[i - 1].close;
+      if (i <= period) { gain += Math.max(ch, 0); loss += Math.max(-ch, 0); }
+      if (i === period) { gain /= period; loss /= period; }
+      else if (i > period) {
+        gain = (gain * (period - 1) + Math.max(ch, 0)) / period;
+        loss = (loss * (period - 1) + Math.max(-ch, 0)) / period;
+      }
+      if (i >= period) out.push({ time: bars[i].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+    }
+    return out;
+  }
+  function emaOfSeries(values, period) {
+    var k = 2 / (period + 1), out = [], prev = null;
+    for (var i = 0; i < values.length; i++) {
+      prev = prev === null ? values[i].value : values[i].value * k + prev * (1 - k);
+      out.push({ time: values[i].time, value: prev });
+    }
+    return out;
+  }
+  function calcMACD(bars, f, sl, sig) {
+    var closes = [];
+    for (var i = 0; i < bars.length; i++) closes.push({ time: bars[i].time, value: bars[i].close });
+    var ef = emaOfSeries(closes, f), es = emaOfSeries(closes, sl);
+    var line = [];
+    for (i = sl - 1; i < closes.length; i++) line.push({ time: closes[i].time, value: ef[i].value - es[i].value });
+    var signal = emaOfSeries(line, sig);
+    var hist = [];
+    for (i = 0; i < line.length; i++) hist.push({ time: line[i].time, value: line[i].value - signal[i].value });
+    return { line: line, signal: signal, hist: hist };
+  }
+  function smaOfSeries(values, period) {
+    var out = [], sum = 0;
+    for (var i = 0; i < values.length; i++) {
+      sum += values[i].value;
+      if (i >= period) sum -= values[i - period].value;
+      if (i >= period - 1) out.push({ time: values[i].time, value: sum / period });
+    }
+    return out;
+  }
+  function calcStoch(bars, kP, dP, smooth) {
+    var raw = [];
+    for (var i = kP - 1; i < bars.length; i++) {
+      var hh = -Infinity, ll = Infinity;
+      for (var j = i - kP + 1; j <= i; j++) { if (bars[j].high > hh) hh = bars[j].high; if (bars[j].low < ll) ll = bars[j].low; }
+      raw.push({ time: bars[i].time, value: hh === ll ? 50 : (bars[i].close - ll) / (hh - ll) * 100 });
+    }
+    var k = smooth > 1 ? smaOfSeries(raw, smooth) : raw;
+    return { k: k, d: smaOfSeries(k, dP) };
+  }
+
+  Chart.prototype.addIndicator = function (kind, params, color) {
+    var def = IND_DEFS[kind];
+    if (!def) return null;
+    var ind = {
+      id: "i" + Math.round(performance.now() * 1000) + "_" + this.indicators.length,
+      kind: kind,
+      params: Object.assign({}, def.params, params || {}),
+      color: color || IND_PALETTE[this._indColor++ % IND_PALETTE.length],
+    };
+    this.indicators.push(ind);
+    this._applyIndicators();
+    this._persistInd();
+    return ind.id;
+  };
+  Chart.prototype.removeIndicator = function (id) {
+    this.indicators = this.indicators.filter(function (x) { return x.id !== id; });
+    this._applyIndicators();
+    this._persistInd();
+  };
+  Chart.prototype.updateIndicator = function (id, params) {
+    for (var i = 0; i < this.indicators.length; i++) {
+      if (this.indicators[i].id === id) Object.assign(this.indicators[i].params, params || {});
+    }
+    this._applyIndicators();
+    this._persistInd();
+  };
+  Chart.prototype.getIndicators = function () { return this.indicators.slice(); };
+  Chart.prototype.setChartType = function (t) {
+    if (["candles", "bars", "line", "area"].indexOf(t) < 0) return;
+    this.chartType = t;
+    this._paint();
+  };
+  Chart.prototype._persistInd = function () {
+    if (!this._persistKey) return;
+    try { localStorage.setItem(this._persistKey + ":ind", JSON.stringify(this.indicators)); } catch (e) {}
+  };
+
+  // Recompute everything the indicator list implies: overlay lines on the
+  // price pane, one oscillator pane per oscillator, guides included.
+  Chart.prototype._applyIndicators = function () {
+    var self = this;
+    // wipe indicator-owned series (ids prefixed "@") and every osc pane
+    for (var pi = 0; pi < this.panes.length; pi++) {
+      var pn = this.panes[pi], id;
+      for (id in pn.lines) if (id.charAt(0) === "@") delete pn.lines[id];
+      for (id in pn.hists) if (id.charAt(0) === "@") delete pn.hists[id];
+    }
+    this.panes = [this.panes[0]];
+    this.panes[0].guides = [];
+    var bars = this.bars, pane = 1;
+    this.indicators.forEach(function (ind) {
+      var P = ind.params, key = "@" + ind.id;
+      if (ind.kind === "ema") self.addLine(key, calcEMA(bars, P.p || 20), ind.color, 1.4);
+      else if (ind.kind === "sma") self.addLine(key, calcSMA(bars, P.p || 50), ind.color, 1.4);
+      else if (ind.kind === "vwap") self.addLine(key, calcVWAP(bars), ind.color, 1.4);
+      else if (ind.kind === "bb") {
+        var bb = calcBB(bars, P.p || 20, P.mult || 2);
+        self.addLine(key + "u", bb.up, ind.color, 1);
+        self.addLine(key + "m", bb.mid, ind.color, 1);
+        self.addLine(key + "l", bb.lo, ind.color, 1);
+      } else if (ind.kind === "rsi") {
+        self.addLine(key, calcRSI(bars, P.p || 14), ind.color, 1.4, pane);
+        self.addGuide(pane, 70, "rgba(248,81,73,0.5)");
+        self.addGuide(pane, 30, "rgba(0,217,126,0.5)");
+        pane++;
+      } else if (ind.kind === "macd") {
+        var m = calcMACD(bars, P.f || 12, P.s || 26, P.sig || 9);
+        self.addHistogram(key + "h", m.hist, pane);
+        self.addLine(key, m.line, "#58a6ff", 1.2, pane);
+        self.addLine(key + "s", m.signal, "#f0b429", 1.2, pane);
+        self.addGuide(pane, 0, "rgba(139,148,158,0.4)");
+        pane++;
+      } else if (ind.kind === "stoch") {
+        var st = calcStoch(bars, P.k || 14, P.d || 3, P.s || 3);
+        self.addLine(key, st.k, "#58a6ff", 1.2, pane);
+        self.addLine(key + "d", st.d, "#f0b429", 1.2, pane);
+        self.addGuide(pane, 80, "rgba(248,81,73,0.5)");
+        self.addGuide(pane, 20, "rgba(0,217,126,0.5)");
+        pane++;
+      }
+    });
+    this._paint();
+  };
+
   Chart.prototype.addPriceLine = function (price, color, label) {
     this.priceLines.push({ price: price, color: color || "#8b949e", label: label });
     this._paint();
@@ -368,6 +687,10 @@
     this._persistKey = key || null;
     if (key) {
       try { this.loadDrawings(localStorage.getItem(key)); } catch (e) { this.loadDrawings([]); }
+      try {
+        var ind = JSON.parse(localStorage.getItem(key + ":ind"));
+        if (Array.isArray(ind)) { this.indicators = ind; this._applyIndicators(); }
+      } catch (e) {}
     }
   };
   Chart.prototype._persist = function () {
@@ -540,18 +863,58 @@
     }
 
     var half = Math.max(0.5, this.barSpacing * 0.35);
-    for (i = lo; i <= hi; i++) {
-      b = this.bars[i]; if (!b) continue;
-      var cx = this.indexToX(i);
-      if (cx < -this.barSpacing || cx > W + this.barSpacing) continue;
-      var up = b.close >= b.open;
-      var yO = pp.toY(b.open), yC = pp.toY(b.close);
-      var yH = pp.toY(b.high), yL = pp.toY(b.low);
-      c.strokeStyle = up ? o.wickUp : o.wickDown;
-      c.lineWidth = 1;
-      c.beginPath(); c.moveTo(Math.round(cx) + 0.5, yH); c.lineTo(Math.round(cx) + 0.5, yL); c.stroke();
-      c.fillStyle = up ? o.upColor : o.downColor;
-      c.fillRect(cx - half, Math.min(yO, yC), half * 2, Math.max(1, Math.abs(yC - yO)));
+    var ct = this.chartType;
+    if (ct === "line" || ct === "area") {
+      c.save();
+      c.beginPath(); c.rect(0, pp.y0, W, pp.h); c.clip();
+      c.strokeStyle = o.upColor; c.lineWidth = 1.6;
+      c.beginPath();
+      var startedM = false, firstX = null, lastX = null;
+      for (i = lo; i <= hi; i++) {
+        b = this.bars[i]; if (!b) continue;
+        var mx = this.indexToX(i), my = pp.toY(b.close);
+        if (!startedM) { c.moveTo(mx, my); startedM = true; firstX = mx; } else c.lineTo(mx, my);
+        lastX = mx;
+      }
+      c.stroke();
+      if (ct === "area" && startedM) {
+        var gr = c.createLinearGradient(0, pp.y0, 0, pp.y0 + pp.h);
+        gr.addColorStop(0, "rgba(0,217,126,0.25)");
+        gr.addColorStop(1, "rgba(0,217,126,0)");
+        c.lineTo(lastX, pp.y0 + pp.h); c.lineTo(firstX, pp.y0 + pp.h); c.closePath();
+        c.fillStyle = gr;
+        c.fill();
+      }
+      c.restore();
+    } else if (ct === "bars") {
+      for (i = lo; i <= hi; i++) {
+        b = this.bars[i]; if (!b) continue;
+        var bx2 = this.indexToX(i);
+        if (bx2 < -this.barSpacing || bx2 > W + this.barSpacing) continue;
+        var bup = b.close >= b.open;
+        c.strokeStyle = bup ? o.upColor : o.downColor;
+        c.lineWidth = 1;
+        var xR = Math.round(bx2) + 0.5;
+        c.beginPath();
+        c.moveTo(xR, pp.toY(b.high)); c.lineTo(xR, pp.toY(b.low));
+        c.moveTo(xR - half, pp.toY(b.open)); c.lineTo(xR, pp.toY(b.open));
+        c.moveTo(xR, pp.toY(b.close)); c.lineTo(xR + half, pp.toY(b.close));
+        c.stroke();
+      }
+    } else {
+      for (i = lo; i <= hi; i++) {
+        b = this.bars[i]; if (!b) continue;
+        var cx = this.indexToX(i);
+        if (cx < -this.barSpacing || cx > W + this.barSpacing) continue;
+        var up = b.close >= b.open;
+        var yO = pp.toY(b.open), yC = pp.toY(b.close);
+        var yH = pp.toY(b.high), yL = pp.toY(b.low);
+        c.strokeStyle = up ? o.wickUp : o.wickDown;
+        c.lineWidth = 1;
+        c.beginPath(); c.moveTo(Math.round(cx) + 0.5, yH); c.lineTo(Math.round(cx) + 0.5, yL); c.stroke();
+        c.fillStyle = up ? o.upColor : o.downColor;
+        c.fillRect(cx - half, Math.min(yO, yC), half * 2, Math.max(1, Math.abs(yC - yO)));
+      }
     }
 
     // ── every pane: histograms, guides, lines (price pane has only lines) ──
@@ -959,7 +1322,7 @@
   };
 
   global.TRCharts = {
-    version: "0.6.0",
+    version: "0.7.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
