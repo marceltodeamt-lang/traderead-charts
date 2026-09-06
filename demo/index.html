@@ -20,7 +20,7 @@
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.15</h1>
+  <h1>TradeRead Charts v0.16</h1>
   <div class="grp" id="tfs"></div>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
@@ -29,18 +29,20 @@
 <div id="readout"></div>
 <script src="../src/traderead-charts.js"></script>
 <script>
-  var TFS = [["1m",60],["5m",300],["15m",900],["1H",3600],["4H",14400],["1D",86400],["1W",604800]];
+  var TFS = [["1m",60],["2m",120],["3m",180],["5m",300],["15m",900],["30m",1800],["1H",3600],["4H",14400],["1D",86400],["1W",604800],["1M","1M"],["1Y","1Y"]];
+  var PRO_TFS = { "2m": 1, "3m": 1, "1M": 1, "1Y": 1 };   // marcate vizual ca Pro in demo
   var tfSec = 3600, bars = [];
   function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var v = Math.imul(seed ^ seed >>> 15, 1 | seed); v = v + Math.imul(v ^ v >>> 7, 61 | v) ^ v; return ((v ^ v >>> 14) >>> 0) / 4294967296; }; }
   function genBars() {
     var rnd = mulberry(42), out = [];
-    var t = Math.floor(Date.now() / 1000 / tfSec) * tfSec - 600 * tfSec;
-    var px = 65000, amp = 260 * Math.sqrt(tfSec / 3600);
+    var sec = typeof tfSec === "number" ? tfSec : 86400 * (tfSec === "1M" ? 30 : 365);
+    var t = Math.floor(Date.now() / 1000 / sec) * sec - 600 * sec;
+    var px = 65000, amp = 260 * Math.sqrt(sec / 3600);
     for (var i = 0; i < 600; i++) {
       var open = px, close = px + (rnd() - 0.485) * amp;
       var high = Math.max(open, close) + rnd() * amp * 0.55;
       var low = Math.min(open, close) - rnd() * amp * 0.55;
-      out.push({ time: t + i * tfSec, open: open, high: high, low: low, close: close, volume: 50 + rnd() * 400 });
+      out.push({ time: t + i * sec, open: open, high: high, low: low, close: close, volume: 50 + rnd() * 400 });
       px = close;
     }
     return out;
@@ -67,15 +69,21 @@
       })
       .catch(function () { cb([]); });
   }
-  var TF_BINANCE = { 60: "1m", 300: "5m", 900: "15m", 3600: "1h", 14400: "4h", 86400: "1d", 604800: "1w" };
+  // native unde exista; 2m se agrega din 1m, 1Y din 1M — TRCharts.resample
+  var TF_BINANCE = { 60: "1m", 180: "3m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h", 14400: "4h", 86400: "1d", 604800: "1w", "1M": "1M" };
+  var TF_DERIVED = { 120: { from: "1m", spec: 120 }, "1Y": { from: "1M", spec: "1Y" } };
   var liveSymbol = null;   // null = datele sintetice
   function loadReal(item) {
-    fetch("https://api.binance.com/api/v3/klines?symbol=" + item.symbol + "&interval=" + (TF_BINANCE[tfSec] || "1h") + "&limit=600")
+    var drv = TF_DERIVED[tfSec];
+    var interval = drv ? drv.from : (TF_BINANCE[tfSec] || "1h");
+    var limit = drv ? 1000 : 600;
+    fetch("https://api.binance.com/api/v3/klines?symbol=" + item.symbol + "&interval=" + interval + "&limit=" + limit)
       .then(function (r) { return r.json(); })
       .then(function (rows) {
         bars = rows.map(function (k) {
           return { time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] };
         });
+        if (drv) bars = TRCharts.resample(bars, drv.spec);
         liveSymbol = item;
         chart.setData(bars);
         chart.setPersistKey("trc-demo:" + item.symbol + ":" + tfSec);
@@ -120,6 +128,7 @@
   TFS.forEach(function (tf) {
     var b = document.createElement("button");
     b.textContent = tf[0];
+    if (PRO_TFS[tf[0]]) { b.textContent = tf[0] + "★"; b.title = "Pro timeframe"; }
     if (tf[1] === tfSec) b.className = "on";
     b.addEventListener("click", function () {
       tfSec = tf[1];
@@ -153,7 +162,7 @@
   // date reale: ultimele 2 candele la fiecare 5s — update() ruleaza rollul
   setInterval(function () {
     if (!liveSymbol) return;
-    fetch("https://api.binance.com/api/v3/klines?symbol=" + liveSymbol.symbol + "&interval=" + (TF_BINANCE[tfSec] || "1h") + "&limit=2")
+    fetch("https://api.binance.com/api/v3/klines?symbol=" + liveSymbol.symbol + "&interval=" + (TF_DERIVED[tfSec] ? TF_DERIVED[tfSec].from : (TF_BINANCE[tfSec] || "1h")) + "&limit=2")
       .then(function (r) { return r.json(); })
       .then(function (rows) {
         rows.forEach(function (k) {
@@ -166,7 +175,7 @@
   setInterval(function () {
     if (!bars.length || liveSymbol) return;
     var b = Object.assign({}, bars[bars.length - 1]);
-    b.close += (rndLive() - 0.5) * 60 * Math.sqrt(tfSec / 3600);
+    b.close += (rndLive() - 0.5) * 60 * Math.sqrt((typeof tfSec === "number" ? tfSec : 86400) / 3600);
     b.high = Math.max(b.high, b.close); b.low = Math.min(b.low, b.close);
     bars[bars.length - 1] = b;
     chart.update(b);

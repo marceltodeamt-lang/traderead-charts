@@ -33,7 +33,8 @@
     oscPaneHeight: 110,       // default px height of an oscillator pane
     minPricePaneFrac: 0.45,   // price pane never shrinks below this share
     logo: true,
-    ui: true,               // the bundled rail + indicator panel + type switcher + camera
+    ui: true,
+    maxIndicators: 0,       // 0 = unlimited (Pro); Standard builds pass 4               // the bundled rail + indicator panel + type switcher + camera
   };
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -403,6 +404,9 @@
         h += '<button data-del="' + ind.id + '" style="border:none;background:none;color:inherit;cursor:pointer;opacity:0.7;font:inherit;">✕</button></div>';
       });
       h += '<div style="border-top:1px solid ' + o.separatorColor + ';margin:8px 0;"></div>';
+      if (self.opt.maxIndicators > 0 && list.length >= self.opt.maxIndicators) {
+        h += '<div style="color:' + o.textColor + ';font-size:11px;margin:4px 0;">Standard: max ' + self.opt.maxIndicators + ' indicators — Pro is unlimited.</div>';
+      }
       Object.keys(IND_DEFS).forEach(function (kind) {
         h += '<button data-add="' + kind + '" style="border:1px solid ' + o.separatorColor + ';background:none;color:inherit;' +
           'cursor:pointer;font:inherit;border-radius:7px;padding:3px 8px;margin:2px 3px 2px 0;">+ ' + IND_DEFS[kind].label + '</button>';
@@ -818,6 +822,10 @@
   Chart.prototype.addIndicator = function (kind, params, color) {
     var def = IND_DEFS[kind];
     if (!def) return null;
+    if (this.opt.maxIndicators > 0 && this.indicators.length >= this.opt.maxIndicators) {
+      if (this.opt.onLimit) this.opt.onLimit("indicators", this.opt.maxIndicators);
+      return null;
+    }
     var ind = {
       id: "i" + Math.round(performance.now() * 1000) + "_" + this.indicators.length,
       kind: kind,
@@ -1896,9 +1904,38 @@
     },
   };
 
+  // Resample finer bars into a coarser frame: any fixed step in seconds, or
+  // the calendar frames "1M"/"1Y" (months and years have no fixed length).
+  // This is what makes custom timeframes provider-independent: a source that
+  // only serves 1m can still feed a 2m/3m/1M/1Y chart.
+  function resample(bars, spec) {
+    if (!bars || !bars.length) return [];
+    function bucketOf(t) {
+      if (spec === "1M") { var d = new Date(t * 1000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000; }
+      if (spec === "1Y") { var y = new Date(t * 1000); return Date.UTC(y.getUTCFullYear(), 0, 1) / 1000; }
+      return Math.floor(t / spec) * spec;
+    }
+    var out = [], cur = null;
+    for (var i = 0; i < bars.length; i++) {
+      var b = bars[i], bk = bucketOf(b.time);
+      if (!cur || cur.time !== bk) {
+        if (cur) out.push(cur);
+        cur = { time: bk, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume || 0 };
+      } else {
+        if (b.high > cur.high) cur.high = b.high;
+        if (b.low < cur.low) cur.low = b.low;
+        cur.close = b.close;
+        cur.volume += b.volume || 0;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
   global.TRCharts = {
-    version: "0.15.0",
+    version: "0.16.0",
     themes: THEMES,
+    resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
   };
 })(typeof window !== "undefined" ? window : this);

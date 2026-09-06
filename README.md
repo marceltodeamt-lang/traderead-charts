@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.15.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.16.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -66,6 +66,17 @@ engine pass `ui: false` and drive the same APIs themselves.
 - [x] `tick(price)` with the bucket roll built in — a closed candle always
       opens the next one (a production bug class, ended in the library)
 - [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates
+
+## Editions (open-core plan)
+
+- **Standard** (this repo, free): everything you see, up to 4 indicators
+  per chart (`maxIndicators: 4`), standard timeframes incl. 30m, TradeRead
+  mark required.
+- **Pro** (paid, private): unlimited indicators, custom timeframes — the
+  bundled `TRCharts.resample()` turns any finer feed into 2m/3m or the
+  calendar frames 1M/1Y, so custom frames work with every data source.
+  Client-side limits are honesty gates, not DRM: the licence is the
+  enforcement, as with every client-side library.
 
 ## License
 Free for commercial and personal use under the TradeRead Community
