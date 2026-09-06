@@ -1220,9 +1220,11 @@
     var half = Math.max(0.5, this.barSpacing * 0.35);
     var ct = this.chartType;
     if (ct === "baseline") {
-      // Above the base is up-territory, below is down — the base is the
-      // dataset's first close, so it stays put while panning.
-      var baseV = this.bars.length ? this.bars[0].close : 0;
+      // The base sits at the middle of the VISIBLE scale (the TradingView
+      // default): half the frame is always up-territory and half down, so
+      // baseline never degenerates into a plain area on a trending window
+      // (owner's catch, 7 Sep 2026).
+      var baseV = (pp.min + pp.max) / 2;
       var baseY = clamp(pp.toY(baseV), pp.y0, pp.y0 + pp.h);
       var seg = [];
       for (i = lo; i <= hi; i++) {
