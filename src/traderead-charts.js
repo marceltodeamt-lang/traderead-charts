@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.2.0
+ * TradeRead Charts v0.4.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -125,6 +125,9 @@
     this.bars = [];
     this.panes = [new Pane(this, "price")];
     this.priceLines = [];
+    this.drawings = [];             // {type:"trend"|"hline"|"rect", i1,p1, i2,p2} in bar-index/price space
+    this.tool = null;               // null = cursor; "trend"|"hline"|"rect"
+    this._draft = null;
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = 0;
     this.crosshairCb = null;
@@ -135,12 +138,14 @@
     container.style.overflow = "hidden";
 
     this.canvas = document.createElement("canvas");
+    this.drawCanvas = document.createElement("canvas");
     this.overlay = document.createElement("canvas");
-    [this.canvas, this.overlay].forEach(function (c) {
+    [this.canvas, this.drawCanvas, this.overlay].forEach(function (c) {
       c.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block;";
       container.appendChild(c);
     });
     this.ctx = this.canvas.getContext("2d");
+    this.dctx = this.drawCanvas.getContext("2d");
     this.octx = this.overlay.getContext("2d");
 
     if (this.opt.logo) this._mountLogo();
@@ -155,9 +160,9 @@
     var d = document.createElement("div");
     d.className = "trc-logo";
     d.style.cssText = "position:absolute;left:8px;bottom:" + (this.opt.timeAxisHeight + 8) +
-      "px;z-index:3;display:flex;align-items:center;gap:5px;font:800 11px -apple-system,'Segoe UI',sans-serif;" +
-      "color:rgba(139,148,158,0.6);pointer-events:none;user-select:none;";
-    d.innerHTML = '<svg width="14" height="14" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      "px;z-index:3;display:flex;align-items:center;gap:7px;font:800 13.5px -apple-system,'Segoe UI',sans-serif;" +
+      "color:rgba(139,148,158,0.78);pointer-events:none;user-select:none;";
+    d.innerHTML = '<svg width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<line x1="5" y1="3" x2="5" y2="7" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><rect x="2.5" y="7" width="5" height="8" rx="1" fill="#ef4444"/>' +
       '<line x1="5" y1="15" x2="5" y2="20" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><line x1="14" y1="2" x2="14" y2="6" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>' +
       '<rect x="11.5" y="6" width="5" height="13" rx="1" fill="#22c55e"/><line x1="14" y1="19" x2="14" y2="24" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>' +
@@ -170,11 +175,12 @@
     var dpr = window.devicePixelRatio || 1;
     this.w = this.el.clientWidth;
     this.h = this.el.clientHeight;
-    [this.canvas, this.overlay].forEach(function (c) {
+    [this.canvas, this.drawCanvas, this.overlay].forEach(function (c) {
       c.width = Math.round(this.w * dpr);
       c.height = Math.round(this.h * dpr);
     }, this);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.octx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this._paint();
   };
@@ -226,6 +232,10 @@
   Chart.prototype.setData = function (bars) {
     this.bars = (bars || []).slice().sort(function (a, b) { return a.time - b.time; });
     this.rightIndex = this.bars.length - 1;
+    // The label alphabet depends on the bar size: intraday alternates
+    // day-marks with clock times, daily and up never shows a clock.
+    var n = this.bars.length;
+    this._barSec = n > 1 ? Math.max(1, Math.round((this.bars[n - 1].time - this.bars[0].time) / (n - 1))) : 3600;
     this._paint();
   };
   Chart.prototype.update = function (bar) {
@@ -277,6 +287,35 @@
   };
   Chart.prototype.clearPriceLines = function () { this.priceLines = []; this._paint(); };
   Chart.prototype.onCrosshair = function (cb) { this.crosshairCb = cb; };
+  // Drawings live in (bar index, price) space so pan and zoom reproject them.
+  Chart.prototype.setTool = function (t) { this.tool = t || null; this.el.style.cursor = t ? "crosshair" : ""; };
+  Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._paintDrawings(); };
+  Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
+  Chart.prototype._paintDrawings = function () {
+    var c = this.dctx, W = this._plotW(), pp = this.panes[0];
+    c.clearRect(0, 0, this.w, this.h);
+    var list = this._draft ? this.drawings.concat([this._draft]) : this.drawings;
+    for (var k = 0; k < list.length; k++) {
+      var d = list[k];
+      c.strokeStyle = "#6366f1"; c.lineWidth = 1.5;
+      if (d.type === "hline") {
+        var hy = pp.toY(d.p1);
+        if (hy < pp.y0 || hy > pp.y0 + pp.h) continue;
+        c.beginPath(); c.moveTo(0, Math.round(hy) + 0.5); c.lineTo(W, Math.round(hy) + 0.5); c.stroke();
+      } else if (d.type === "trend") {
+        c.beginPath();
+        c.moveTo(this.indexToX(d.i1), pp.toY(d.p1));
+        c.lineTo(this.indexToX(d.i2), pp.toY(d.p2));
+        c.stroke();
+      } else if (d.type === "rect") {
+        var x1 = this.indexToX(d.i1), x2 = this.indexToX(d.i2);
+        var y1 = pp.toY(d.p1), y2 = pp.toY(d.p2);
+        c.fillStyle = "rgba(99,102,241,0.12)";
+        c.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        c.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+      }
+    }
+  };
   Chart.prototype.applyOptions = function (o) { Object.assign(this.opt, o || {}); this.el.style.background = this.opt.background; this._paint(); };
   Chart.prototype.scrollToRealtime = function () { this.rightIndex = this.bars.length - 1; this._paint(); };
   Chart.prototype.remove = function () { this._ro.disconnect(); this.el.innerHTML = ""; };
@@ -307,11 +346,17 @@
       c.strokeStyle = o.gridColor;
       c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, H); c.stroke();
       var d = new Date(b.time * 1000);
-      var dayKey = d.getUTCMonth() + "-" + d.getUTCDate();
-      var label = (dayKey !== lastDay)
-        ? (d.getUTCDate() === 1 ? MONTHS[d.getUTCMonth()] : d.getUTCDate() + " " + MONTHS[d.getUTCMonth()])
-        : pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
-      lastDay = dayKey;
+      var daily = (this._barSec || 3600) >= 86400;
+      var key = daily ? (d.getUTCFullYear() + "-" + d.getUTCMonth()) : (d.getUTCMonth() + "-" + d.getUTCDate());
+      var label;
+      if (daily) {
+        label = key !== lastDay ? MONTHS[d.getUTCMonth()] + (d.getUTCMonth() === 0 ? " " + d.getUTCFullYear() : "") : "" + d.getUTCDate();
+      } else {
+        label = key !== lastDay
+          ? (d.getUTCDate() === 1 ? MONTHS[d.getUTCMonth()] : d.getUTCDate() + " " + MONTHS[d.getUTCMonth()])
+          : pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
+      }
+      lastDay = key;
       c.fillStyle = o.textColor;
       c.fillText(label, x - c.measureText(label).width / 2, H + 7);
     }
@@ -445,6 +490,7 @@
     c.beginPath(); c.moveTo(W + 0.5, 0); c.lineTo(W + 0.5, this.h); c.stroke();
     c.beginPath(); c.moveTo(0, H + 0.5); c.lineTo(this.w, H + 0.5); c.stroke();
 
+    this._paintDrawings();
     this._paintCross();
   };
 
@@ -473,7 +519,9 @@
     c.fillText(py, W + 5, y);
     if (b) {
       var d = new Date(b.time * 1000);
-      var xt = d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + " " + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
+      var xt = (this._barSec || 3600) >= 86400
+        ? d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + " " + d.getUTCFullYear()
+        : d.getUTCDate() + " " + MONTHS[d.getUTCMonth()] + " " + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes());
       var tw = c.measureText(xt).width + 12;
       c.fillStyle = o.tagBg;
       c.fillRect(clamp(bx - tw / 2, 0, W - tw), H, tw, o.timeAxisHeight - 2);
@@ -490,6 +538,13 @@
     el.addEventListener("mousemove", function (e) {
       var r = el.getBoundingClientRect();
       self._cross = { x: e.clientX - r.left, y: e.clientY - r.top };
+      if (self._draft) {
+        self._draft.i2 = self.xToIndex(self._cross.x);
+        self._draft.p2 = self.panes[0].toValue(self._cross.y);
+        self._paintDrawings();
+        self._paintCross();
+        return;
+      }
       if (drag) {
         self.rightIndex = drag.right0 + (drag.x0 - (e.clientX - r.left)) / self.barSpacing;
         self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
@@ -499,16 +554,48 @@
     el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._paintCross(); if (self.crosshairCb) self.crosshairCb(null); });
     el.addEventListener("mousedown", function (e) {
       var r = el.getBoundingClientRect();
-      drag = { x0: e.clientX - r.left, right0: self.rightIndex };
+      var x = e.clientX - r.left, y = e.clientY - r.top;
+      if (self.tool && self._paneAt(y) === self.panes[0]) {
+        var i0 = self.xToIndex(x), v0 = self.panes[0].toValue(y);
+        if (self.tool === "hline") {
+          self.drawings.push({ type: "hline", p1: v0 });
+          self.setTool(null);
+          if (self._toolDoneCb) self._toolDoneCb();
+          self._paintDrawings();
+        } else {
+          self._draft = { type: self.tool, i1: i0, p1: v0, i2: i0, p2: v0 };
+        }
+        e.preventDefault();
+        return;
+      }
+      drag = { x0: x, right0: self.rightIndex };
       e.preventDefault();
     });
-    window.addEventListener("mouseup", function () { drag = null; });
+    window.addEventListener("mouseup", function () {
+      drag = null;
+      if (self._draft) {
+        var f = self._draft;
+        if (f.i1 !== f.i2 || f.p1 !== f.p2) self.drawings.push(f);
+        self._draft = null;
+        self.setTool(null);
+        if (self._toolDoneCb) self._toolDoneCb();
+        self._paintDrawings();
+      }
+    });
     el.addEventListener("dblclick", function () { self.scrollToRealtime(); });
 
     el.addEventListener("wheel", function (e) {
       e.preventDefault();
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left;
+      // A Mac trackpad swipes horizontally with deltaX: that is a PAN, the
+      // way every charting tool treats it. Vertical wheel stays zoom.
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        self.rightIndex = clamp(self.rightIndex + e.deltaX / self.barSpacing,
+          0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        self._paint();
+        return;
+      }
       var anchor = self.xToIndex(x);
       var k = Math.exp(-e.deltaY * 0.0015);
       self.barSpacing = clamp(self.barSpacing * k, self.opt.minBarSpacing, self.opt.maxBarSpacing);
@@ -541,8 +628,28 @@
     el.addEventListener("touchend", function (e) { if (!e.touches.length) { drag = null; pinch = null; } }, { passive: true });
   };
 
+  // Ready-made palettes; pass one to createChart or applyOptions. Colors are
+  // read at paint time, so switching themes live is one applyOptions call.
+  var THEMES = {
+    dark: {},                               // DEFAULTS already are the dark look
+    light: {
+      background: "#ffffff",
+      textColor: "#5f6b7c",
+      gridColor: "rgba(42,46,57,0.10)",
+      separatorColor: "rgba(42,46,57,0.28)",
+      crosshair: "rgba(95,107,124,0.45)",
+      tagBg: "#e0e3eb",
+      tagText: "#131722",
+      volumeUp: "rgba(8,153,129,0.30)",
+      volumeDown: "rgba(242,54,69,0.30)",
+      upColor: "#089981", downColor: "#f23645",
+      wickUp: "#089981", wickDown: "#f23645",
+    },
+  };
+
   global.TRCharts = {
-    version: "0.2.0",
+    version: "0.4.0",
+    themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
 })(typeof window !== "undefined" ? window : this);
