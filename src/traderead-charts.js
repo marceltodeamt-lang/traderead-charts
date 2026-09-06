@@ -277,6 +277,7 @@
     });
     this.el.appendChild(fsBtn);
     this._fsBtn = fsBtn;
+    this._fitLogo();
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
@@ -364,6 +365,11 @@
     m.style.cssText = "position:absolute;left:44px;top:" + (anchorBtn ? anchorBtn.offsetTop + 4 : 40) + "px;z-index:8;" +
       "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:12px;padding:6px;" +
       "color:" + o.textColor + ";font:12px -apple-system,'Segoe UI',sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.35);";
+    var fitMenu = function () {
+      var h = m.offsetHeight || 0, maxTop = self._plotH() - h - 6;
+      var top = parseInt(m.style.top, 10) || 0;
+      if (top > maxTop) m.style.top = Math.max(6, maxTop) + "px";
+    };
     TYPE_LIST.forEach(function (t) {
       var row = document.createElement("button");
       row.type = "button";
@@ -380,6 +386,7 @@
       m.appendChild(row);
     });
     this.el.appendChild(m);
+    fitMenu();
     this._typeMenu = m;
   };
 
@@ -444,6 +451,8 @@
     }
     repaint();
     this.el.appendChild(p);
+    var hP = p.offsetHeight || 0, maxTopP = this._plotH() - hP - 6;
+    if (10 > maxTopP) p.style.top = Math.max(6, maxTopP) + "px";
     this._indPanel = p;
   };
 
@@ -562,8 +571,8 @@
     } catch (e) {}
     var lightBg = lum > 128;
     d.style.cssText = "position:absolute;left:8px;bottom:" + (this.opt.timeAxisHeight + 8) +
-      "px;z-index:3;display:flex;align-items:center;gap:10px;font:800 24px -apple-system,'Segoe UI',sans-serif;" +
-      "padding:6px 14px 6px 10px;border-radius:12px;" +
+      "px;z-index:3;display:flex;align-items:center;font:800 24px -apple-system,'Segoe UI',sans-serif;" +
+      "border-radius:12px;" +
       "background:" + (lightBg ? "rgba(255,255,255,0.72)" : "rgba(13,17,23,0.66)") + ";" +
       "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);" +
       "color:" + (lightBg ? "rgba(19,23,34,0.9)" : "rgba(205,214,223,0.95)") + ";" +
@@ -575,6 +584,36 @@
       '<line x1="23" y1="6" x2="23" y2="10" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><rect x="20.5" y="10" width="5" height="6" rx="1" fill="#ef4444"/>' +
       '<line x1="23" y1="16" x2="23" y2="21" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/></svg><span>TradeRead</span>';
     this.el.appendChild(d);
+    this._logoEl = d;
+    this._fitLogo();
+  };
+
+  // Small embeds (the homepage widget is ~500px tall) get a compact mark:
+  // full size there overlapped the bottom oscillator pane (owner, 7 Sep 2026).
+  Chart.prototype._fitLogo = function () {
+    var d = this._logoEl;
+    if (!d) return;
+    var small = (this.h || this.el.clientHeight || 600) < 560;
+    d.style.fontSize = small ? "14px" : "24px";
+    d.style.gap = small ? "6px" : "10px";
+    d.style.padding = small ? "3px 9px 3px 7px" : "6px 14px 6px 10px";
+    d.style.borderRadius = small ? "9px" : "12px";
+    var svg = d.querySelector("svg");
+    if (svg) {
+      svg.setAttribute("width", small ? "18" : "30");
+      svg.setAttribute("height", small ? "18" : "30");
+    }
+    // the drawing rail shares the left column; in short frames it can reach
+    // the logo's row — slide the plate right of the rail instead of under it
+    var left = 8;
+    var rail = this.el.querySelector(".trc-rail");
+    if (rail) {
+      var railBottom = rail.offsetTop + rail.offsetHeight;
+      var logoH = small ? 24 : 42;
+      var logoTop = (this.h || this.el.clientHeight || 600) - this.opt.timeAxisHeight - 8 - logoH;
+      if (railBottom + 4 > logoTop) left = rail.offsetLeft + rail.offsetWidth + 6;
+    }
+    d.style.left = left + "px";
   };
 
   Chart.prototype._resize = function () {
@@ -588,6 +627,7 @@
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._fitLogo();
     this._paint();
   };
 
@@ -920,7 +960,7 @@
       var h = document.createElement("div");
       h.className = "trc-header";
       var clickable = !!(this.opt.symbolSearch && this.opt.symbolSearch.search);
-      h.style.cssText = "position:absolute;left:46px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
+      h.style.cssText = "position:absolute;left:" + (this.opt.ui ? 56 : 12) + "px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
         "font:800 15px -apple-system,'Segoe UI',sans-serif;user-select:none;" +
         (clickable ? "cursor:pointer;" : "pointer-events:none;");
       if (clickable) {
@@ -961,8 +1001,8 @@
     if (!this._legend) {
       var lg = document.createElement("div");
       lg.className = "trc-legend";
-      lg.style.cssText = "position:absolute;left:46px;top:34px;right:80px;z-index:4;display:flex;flex-wrap:wrap;gap:2px 12px;" +
-        "font:700 11px -apple-system,'Segoe UI',sans-serif;pointer-events:none;user-select:none;";
+      lg.style.cssText = "position:absolute;left:" + (this.opt.ui ? 56 : 12) + "px;top:34px;right:80px;z-index:4;display:flex;flex-wrap:wrap;gap:2px 12px;" +
+        "font:700 " + ((this.h || 600) < 560 ? 10 : 11) + "px -apple-system,'Segoe UI',sans-serif;pointer-events:none;user-select:none;";
       this.el.appendChild(lg);
       this._legend = lg;
     }
@@ -1612,7 +1652,8 @@
           c.font = "800 10.5px -apple-system, 'Segoe UI', sans-serif";
           c.fillStyle = pn.titleColor || o.textColor;
           c.save(); c.globalAlpha = 0.9;
-          c.fillText(pn.title, 8, pn.y0 + 13);
+          // the tool rail overlays the left edge; titles start clear of it
+          c.fillText(pn.title, o.ui ? 52 : 8, pn.y0 + 13);
           c.restore();
           c.font = o.font;
         }
