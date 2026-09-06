@@ -551,10 +551,24 @@
     d.href = "https://traderead.ai/";
     d.target = "_blank";
     d.rel = "noopener";
+    // A rounded plate separates the mark from whatever sits behind it — on
+    // the volume bars the candle icon camouflaged into the candles (owner,
+    // 7 Sep 2026). Plate tone follows the theme's background luminance.
+    var bg = String(this.opt.background || "#0d1117");
+    var lum = 0;
+    try {
+      var hx = bg.replace("#", "");
+      lum = (parseInt(hx.substr(0, 2), 16) * 0.299 + parseInt(hx.substr(2, 2), 16) * 0.587 + parseInt(hx.substr(4, 2), 16) * 0.114);
+    } catch (e) {}
+    var lightBg = lum > 128;
     d.style.cssText = "position:absolute;left:8px;bottom:" + (this.opt.timeAxisHeight + 8) +
-      "px;z-index:3;display:flex;align-items:center;gap:10px;font:800 27px -apple-system,'Segoe UI',sans-serif;" +
-      "color:rgba(139,148,158,0.82);text-decoration:none;cursor:pointer;user-select:none;";
-    d.innerHTML = '<svg width="34" height="34" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      "px;z-index:3;display:flex;align-items:center;gap:10px;font:800 24px -apple-system,'Segoe UI',sans-serif;" +
+      "padding:6px 14px 6px 10px;border-radius:12px;" +
+      "background:" + (lightBg ? "rgba(255,255,255,0.72)" : "rgba(13,17,23,0.66)") + ";" +
+      "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);" +
+      "color:" + (lightBg ? "rgba(19,23,34,0.9)" : "rgba(205,214,223,0.95)") + ";" +
+      "text-decoration:none;cursor:pointer;user-select:none;";
+    d.innerHTML = '<svg width="30" height="30" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">' +
       '<line x1="5" y1="3" x2="5" y2="7" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><rect x="2.5" y="7" width="5" height="8" rx="1" fill="#ef4444"/>' +
       '<line x1="5" y1="15" x2="5" y2="20" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/><line x1="14" y1="2" x2="14" y2="6" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>' +
       '<rect x="11.5" y="6" width="5" height="13" rx="1" fill="#22c55e"/><line x1="14" y1="19" x2="14" y2="24" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>' +
