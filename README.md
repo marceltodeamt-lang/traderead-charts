@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.16.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.17.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -60,6 +60,7 @@ engine pass `ui: false` and drive the same APIs themselves.
 - [x] Symbol search: by ticker OR name, dropdown on ambiguity — the UI ships
       with the widget, the data source is pluggable (`symbolSearch.search` /
       `onSelect`); the demo bundles a keyless Binance adapter
+- [x] Per-drawing color (floating chip on selection — boxes, lines, text)
 - [x] Per-indicator color picker and custom rename (panel, legend and pane title follow)
 - [x] Oscillator panes carry their own titles
 - [x] Indicator legend with live numeric values (crosshair-tracked) and last-value tags on each oscillator's axis

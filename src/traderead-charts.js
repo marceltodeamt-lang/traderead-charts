@@ -1050,12 +1050,38 @@
   };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
   Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
+  // One selected drawing = one floating style chip: its color (box and text
+  // alike) is editable and persisted per drawing (owner, 7 Sep 2026).
+  Chart.prototype._syncStyleChip = function () {
+    var self = this, o = this.opt;
+    var d = null;
+    for (var i = 0; i < this.drawings.length; i++) if (this.drawings[i].id === this._selected) d = this.drawings[i];
+    if (!d) { if (this._styleChip) { this._styleChip.remove(); this._styleChip = null; } return; }
+    if (!this._styleChip) {
+      var chip = document.createElement("div");
+      chip.className = "trc-style";
+      chip.style.cssText = "position:absolute;left:44px;bottom:" + (o.timeAxisHeight + 10) + "px;z-index:7;" +
+        "display:flex;align-items:center;gap:7px;background:" + o.background + ";border:1px solid " + o.separatorColor + ";" +
+        "border-radius:10px;padding:6px 9px;color:" + o.textColor + ";font:700 11px -apple-system,'Segoe UI',sans-serif;";
+      chip.innerHTML = '<span>Color</span><input type="color" style="width:20px;height:20px;padding:0;border:none;border-radius:5px;background:none;cursor:pointer;">';
+      chip.querySelector("input").addEventListener("input", function () {
+        var sel2 = null;
+        for (var j = 0; j < self.drawings.length; j++) if (self.drawings[j].id === self._selected) sel2 = self.drawings[j];
+        if (sel2) { sel2.color = this.value; self._persist(); self._paintDrawings(); }
+      });
+      this.el.appendChild(chip);
+      this._styleChip = chip;
+    }
+    this._styleChip.querySelector("input").value = d.color || DRAW_COLOR;
+  };
+
   Chart.prototype.deleteSelected = function () {
     if (!this._selected) return;
     var id = this._selected;
     this.drawings = this.drawings.filter(function (d) { return d.id !== id; });
     this._selected = null;
     this._persist();
+    this._syncStyleChip();
     this._paintDrawings();
   };
   Chart.prototype.serializeDrawings = function () {
@@ -1096,8 +1122,9 @@
     for (var k = 0; k < list.length; k++) {
       var d = list[k];
       var sel = d.id && d.id === this._selected;
-      c.strokeStyle = DRAW_COLOR;
-      c.fillStyle = DRAW_COLOR;
+      var dc = d.color || DRAW_COLOR;
+      c.strokeStyle = dc;
+      c.fillStyle = dc;
       c.lineWidth = sel ? 2 : 1.4;
       var x1 = isNum(d.t1) ? this.timeToX(d.t1) : null, y1 = isNum(d.p1) ? pp.toY(d.p1) : null;
       var x2 = isNum(d.t2) ? this.timeToX(d.t2) : null, y2 = isNum(d.p2) ? pp.toY(d.p2) : null;
@@ -1659,6 +1686,7 @@
           self.setTool(null);
           if (self._toolDoneCb) self._toolDoneCb();
           self._persist();
+          self._syncStyleChip();
           self._paintDrawings();
         } else {
           self._draft = { id: newId(), type: self.tool, t1: t0, p1: v0, t2: t0, p2: v0, _x0: x, _y0: y };
@@ -1679,11 +1707,12 @@
         self._selected = hit.d.id;
         self._dragDraw = { d: hit.d, handle: hit.handle,
           t0: self.indexToTime(self.xToIndex(x)), v0: pp.toValue(y) };
+        self._syncStyleChip();
         self._paintDrawings();
         e.preventDefault();
         return;
       }
-      if (self._selected) { self._selected = null; self._paintDrawings(); }
+      if (self._selected) { self._selected = null; self._syncStyleChip(); self._paintDrawings(); }
       stopGlide();
       glide.lastX = x; glide.lastT = 0;
       drag = { x0: x, right0: self.rightIndex };
@@ -1705,6 +1734,7 @@
           self.setTool(null);
           if (self._toolDoneCb) self._toolDoneCb();
           self._persist();
+          self._syncStyleChip();
           self._paintDrawings();
         }
       }
@@ -1801,6 +1831,7 @@
           self._selected = hit.d.id;
           self._dragDraw = { d: hit.d, handle: hit.handle, t0: self.indexToTime(self.xToIndex(tx)), v0: pp.toValue(ty) };
           self._touchLock();
+          self._syncStyleChip();
           self._paintDrawings();
           return;
         }
@@ -1933,7 +1964,7 @@
   }
 
   global.TRCharts = {
-    version: "0.16.0",
+    version: "0.17.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
