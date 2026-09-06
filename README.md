@@ -1,5 +1,23 @@
 # TradeRead Charts
 
+**A complete financial charting widget for JavaScript — not just an engine.**
+Candlestick charts, technical indicators with a TradingView-style panel,
+drawing tools, symbol search, light/dark themes: everything included, zero
+dependencies, one `<script>` tag. A free, self-hosted alternative to
+TradingView's Lightweight Charts™ for anyone who wants the whole widget,
+not a bare canvas.
+
+![TradeRead Charts — candlesticks, EMA overlays, RSI and MACD panes, live legend](docs/media/screenshot.png)
+
+- 🕯️ 7 chart types: candles, hollow candles, Heikin Ashi, OHLC bars, line, area, baseline
+- 📊 Built-in indicators: unlimited EMAs/SMAs, VWAP, Bollinger, RSI, MACD, Stochastic — add, remove, rename, recolor from the bundled panel
+- ✏️ Drawing tools: trend line, horizontal, rectangle, Fibonacci retracement, text — move, resize, style, persisted per symbol
+- 🔎 Symbol search by ticker **or name**, with a pluggable data source (keyless Binance adapter included)
+- 📱 Touch-first: pinch zoom, one-finger drawing, momentum scrolling
+- 🌗 Light & dark themes, live-switchable
+- ⚡ 50,000 candles load in ~1.4 ms; dense repaint under 1 ms
+- 🏭 In production on [traderead.ai](https://traderead.ai) — the interactive widget, the AI-read captures and every chart posted to X
+
 A financial charting engine built from first principles by TradeRead —
 candlesticks, volume, overlays, crosshair, inertia-free pan/zoom, touch,
 high-DPI rendering. No third-party rendering code: every line in `src/`
