@@ -1160,11 +1160,39 @@
     this._syncStyleChip();
     this._paintDrawings();
   };
+  Chart.prototype._toPoints = function (d) {
+    // The site (server sanitizer + index.html opt-in row) speaks a
+    // points-based shape; emit it alongside our t/p fields so both read it.
+    var pts = [];
+    if (isNum(d.t1)) pts.push({ time: d.t1, price: d.p1 });
+    if (isNum(d.t2)) pts.push({ time: d.t2, price: d.p2 });
+    if (d.type === "hline") pts = [{ time: d.t1 || null, price: d.p1 }];
+    return pts;
+  };
   Chart.prototype.serializeDrawings = function () {
-    return JSON.stringify(this.drawings, function (k, v) { return k === "_tw" ? undefined : v; });
+    var self = this;
+    var arr = this.drawings.map(function (d) {
+      var o = { id: d.id, type: d.type, points: self._toPoints(d) };
+      if (isNum(d.t1)) o.t1 = d.t1; if (isNum(d.p1)) o.p1 = d.p1;
+      if (isNum(d.t2)) o.t2 = d.t2; if (isNum(d.p2)) o.p2 = d.p2;
+      if (d.color) o.color = d.color;
+      if (d.text) o.text = d.text;
+      if (isNum(d.size)) o.size = d.size;
+      return o;
+    });
+    return JSON.stringify(arr);
   };
   Chart.prototype.loadDrawings = function (json) {
-    try { this.drawings = (typeof json === "string" ? JSON.parse(json) : json) || []; } catch (e) { this.drawings = []; }
+    var list;
+    try { list = (typeof json === "string" ? JSON.parse(json) : json) || []; } catch (e) { list = []; }
+    // accept the site's points-based shape and hydrate our t/p anchors
+    this.drawings = list.map(function (d) {
+      if (!isNum(d.t1) && d.points && d.points.length) {
+        d.t1 = d.points[0].time; d.p1 = d.points[0].price;
+        if (d.points[1]) { d.t2 = d.points[1].time; d.p2 = d.points[1].price; }
+      }
+      return d;
+    });
     this._selected = null;
     this._syncStyleChip();
     this._paintDrawings();
@@ -2064,7 +2092,7 @@
   }
 
   global.TRCharts = {
-    version: "0.20.0",
+    version: "0.21.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
