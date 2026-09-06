@@ -944,6 +944,10 @@
     var bars = this.bars, pane = 1;
     this.indicators.forEach(function (ind) {
       var P = ind.params, key = "@" + ind.id;
+      var defL = IND_DEFS[ind.kind];
+      var indLabel = defL.label + (P.p ? " " + P.p
+        : ind.kind === "macd" ? " " + (P.f || 12) + "/" + (P.s || 26) + "/" + (P.sig || 9)
+        : ind.kind === "stoch" ? " " + (P.k || 14) + "/" + (P.d || 3) + "/" + (P.s || 3) : "");
       if (ind.kind === "ema") self.addLine(key, calcEMA(bars, P.p || 20), ind.color, 1.4);
       else if (ind.kind === "sma") self.addLine(key, calcSMA(bars, P.p || 50), ind.color, 1.4);
       else if (ind.kind === "vwap") self.addLine(key, calcVWAP(bars), ind.color, 1.4);
@@ -956,6 +960,8 @@
         self.addLine(key, calcRSI(bars, P.p || 14), ind.color, 1.4, pane);
         self.addGuide(pane, 70, "rgba(248,81,73,0.5)");
         self.addGuide(pane, 30, "rgba(0,217,126,0.5)");
+        self.panes[pane].title = indLabel;
+        self.panes[pane].titleColor = ind.color;
         pane++;
       } else if (ind.kind === "macd") {
         var m = calcMACD(bars, P.f || 12, P.s || 26, P.sig || 9);
@@ -963,6 +969,8 @@
         self.addLine(key, m.line, "#58a6ff", 1.2, pane);
         self.addLine(key + "s", m.signal, "#f0b429", 1.2, pane);
         self.addGuide(pane, 0, "rgba(139,148,158,0.4)");
+        self.panes[pane].title = indLabel;
+        self.panes[pane].titleColor = ind.color;
         pane++;
       } else if (ind.kind === "stoch") {
         var st = calcStoch(bars, P.k || 14, P.d || 3, P.s || 3);
@@ -970,6 +978,8 @@
         self.addLine(key + "d", st.d, "#f0b429", 1.2, pane);
         self.addGuide(pane, 80, "rgba(248,81,73,0.5)");
         self.addGuide(pane, 20, "rgba(0,217,126,0.5)");
+        self.panes[pane].title = indLabel;
+        self.panes[pane].titleColor = ind.color;
         pane++;
       }
       // legend reference: the indicator's primary line, wherever it landed
@@ -1400,6 +1410,15 @@
         // separator above the pane
         c.strokeStyle = o.separatorColor;
         c.beginPath(); c.moveTo(0, pn.y0 + 0.5); c.lineTo(this.w, pn.y0 + 0.5); c.stroke();
+        // the pane says what it is (owner, 7 Sep 2026)
+        if (pn.title) {
+          c.font = "800 10.5px -apple-system, 'Segoe UI', sans-serif";
+          c.fillStyle = pn.titleColor || o.textColor;
+          c.save(); c.globalAlpha = 0.9;
+          c.fillText(pn.title, 8, pn.y0 + 13);
+          c.restore();
+          c.font = o.font;
+        }
       }
     }
 
@@ -1855,7 +1874,7 @@
   };
 
   global.TRCharts = {
-    version: "0.13.0",
+    version: "0.14.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
