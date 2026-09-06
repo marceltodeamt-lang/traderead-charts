@@ -20,7 +20,7 @@
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.9</h1>
+  <h1>TradeRead Charts v0.10</h1>
   <div class="grp" id="tfs"></div>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
@@ -51,6 +51,8 @@
     bars = genBars();
     chart.setData(bars);
     chart.setPersistKey("trc-demo:" + tfSec);
+    var tfName = TFS.filter(function (t) { return t[1] === tfSec; })[0][0];
+    chart.setSymbolInfo({ ticker: "BTC", title: "Bitcoin / TetherUS", tf: tfName });
     // fara nimic salvat: pornim cu setul standard al widgetului de productie
     if (!chart.getIndicators().length && !localStorage.getItem("trc-demo:" + tfSec + ":ind")) {
       chart.addIndicator("ema", { p: 9 }, "#00d97e");

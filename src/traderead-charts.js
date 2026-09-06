@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v0.9.0
+ * TradeRead Charts v0.10.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles. TradeRead Community License
  * (see LICENSE.md): free to use, the TradeRead mark stays visible.
@@ -119,7 +119,12 @@
     if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
     if (min === max) { min -= 0.5; max += 0.5; }
     var pad = (max - min) * this.chart.opt.autoScalePadPct;
-    this.min = min - pad; this.max = max + pad;
+    min -= pad; max += pad;
+    if (this.kind === "price" && this.chart._vZoom !== 1) {
+      var mid = (min + max) / 2, halfR = (max - min) / 2 * this.chart._vZoom;
+      min = mid - halfR; max = mid + halfR;
+    }
+    this.min = min; this.max = max;
   };
 
   function Chart(container, options) {
@@ -137,6 +142,7 @@
     this._persistKey = null;
     this._saveT = null;
     this._sepDrag = null;           // {i, y0, h0} while a pane separator is dragged
+    this._vZoom = 1;                // vertical stretch of the price pane (wheel on the axis)
     this.indicators = [];           // built-in indicator list (see addIndicator)
     this._indColor = 0;
     this.chartType = "candles";     // "candles" | "bars" | "line" | "area" | "baseline"
@@ -238,6 +244,23 @@
     btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
     this.el.appendChild(rail);
     this._rail = rail;
+
+    // fullscreen, bottom-right (owner, 7 Sep 2026)
+    var fsIcon = SVGI('<path d="M2.5 6 V2.5 H6 M10 2.5 H13.5 V6 M13.5 10 V13.5 H10 M6 13.5 H2.5 V10"/>');
+    var fsExit = SVGI('<path d="M6 2.5 V6 H2.5 M13.5 6 H10 V2.5 M10 13.5 V10 H13.5 M2.5 10 H6 V13.5"/>');
+    var fsBtn = document.createElement("button");
+    fsBtn.type = "button"; fsBtn.title = "Fullscreen"; fsBtn.innerHTML = fsIcon;
+    fsBtn.style.cssText = "position:absolute;right:8px;bottom:" + (o.timeAxisHeight + 8) + "px;z-index:6;" +
+      "width:28px;height:28px;border:1px solid " + o.separatorColor + ";border-radius:8px;background:" + o.background + ";" +
+      "color:" + o.textColor + ";cursor:pointer;display:flex;align-items:center;justify-content:center;";
+    fsBtn.addEventListener("click", function () {
+      if (document.fullscreenElement === self.el) document.exitFullscreen();
+      else if (self.el.requestFullscreen) self.el.requestFullscreen();
+    });
+    document.addEventListener("fullscreenchange", function () {
+      fsBtn.innerHTML = document.fullscreenElement === self.el ? fsExit : fsIcon;
+    });
+    this.el.appendChild(fsBtn);
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
@@ -499,6 +522,7 @@
       if (atRight) this.rightIndex = this.bars.length - 1;
     }
     this._ha = null;
+    this._paintHeader();
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
   };
@@ -682,6 +706,38 @@
   Chart.prototype.getIndicators = function () { return this.indicators.slice(); };
   // Per-bar markers: entries, exits, signals. Sorted once; drawn above the
   // bar's high or below its low with a small gap that scales with spacing.
+  // "BTC · 1H · 79,822 −0.02%" — the render header the production widget
+  // shows; price and change refresh with every setData/update.
+  Chart.prototype.setSymbolInfo = function (info) {
+    this._symbolInfo = info || null;
+    if (!this._header) {
+      var h = document.createElement("div");
+      h.className = "trc-header";
+      h.style.cssText = "position:absolute;left:46px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
+        "font:800 15px -apple-system,'Segoe UI',sans-serif;pointer-events:none;user-select:none;";
+      this.el.appendChild(h);
+      this._header = h;
+    }
+    this._paintHeader();
+  };
+  Chart.prototype._paintHeader = function () {
+    if (!this._header) return;
+    var o = this.opt, inf = this._symbolInfo || {};
+    var n = this.bars.length;
+    var last = n ? this.bars[n - 1] : null;
+    var prev = n > 1 ? this.bars[n - 2] : null;
+    var px = last ? fmtPrice(last.close, last.close >= 1000 ? 2 : 4) : "";
+    var chg = last && prev ? (last.close - prev.close) / prev.close * 100 : null;
+    var up = chg !== null && chg >= 0;
+    this._header.innerHTML =
+      '<span style="color:' + (o.tagText || "#e6edf3") + ';font-size:17px;">' + (inf.ticker || "") + "</span>" +
+      (inf.tf ? '<span style="color:' + o.textColor + ';font-weight:700;font-size:12px;">' + inf.tf + "</span>" : "") +
+      (px ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';">' + px + "</span>" : "") +
+      (chg !== null ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';font-weight:700;font-size:12px;">' +
+        (up ? "+" : "") + chg.toFixed(2) + "%</span>" : "") +
+      (inf.title ? '<span style="color:' + o.textColor + ';font-weight:600;font-size:12px;">' + inf.title + "</span>" : "");
+  };
+
   Chart.prototype.setMarkers = function (list) {
     this.markers = (list || []).slice().sort(function (a, b) { return a.time - b.time; });
     this._paint();
@@ -866,6 +922,7 @@
           c.save(); c.globalAlpha = 0.35;
           c.strokeRect(x1 - 3, y1 - fs - 2, d._tw + 6, fs + 8);
           c.restore();
+          c.fillRect(x1 + d._tw + 3, y1 - 3, 6, 6);   // size grip: drag down = bigger
         }
       }
     }
@@ -888,6 +945,10 @@
       var x2 = isNum(d.t2) ? this.timeToX(d.t2) : null, y2 = isNum(d.p2) ? pp.toY(d.p2) : null;
       if (d.id === this._selected && x2 !== null && Math.abs(x - x2) < 7 && Math.abs(y - y2) < 7 &&
           (d.type === "rect" || d.type === "fib" || d.type === "trend")) return { d: d, handle: "p2" };
+      if (d.id === this._selected && d.type === "text") {
+        var fsz = d.size || 12, tw2 = d._tw || (d.text || "").length * fsz * 0.62;
+        if (Math.abs(x - (x1 + tw2 + 6)) < 8 && Math.abs(y - y1) < 8) return { d: d, handle: "size" };
+      }
       if (d.id === this._selected && d.type === "trend" && Math.abs(x - x1) < 7 && Math.abs(y - y1) < 7) return { d: d, handle: "p1" };
       if (d.type === "hline") { if (Math.abs(y - y1) < 6) return { d: d, handle: null }; }
       else if (d.type === "trend") { if (distToSeg(x, y, { x: x1, y: y1 }, { x: x2, y: y2 }) < 6) return { d: d, handle: null }; }
@@ -1281,7 +1342,11 @@
       if (self._dragDraw) {
         var dd = self._dragDraw, ppm = self.panes[0];
         var tNow = self.indexToTime(self.xToIndex(self._cross.x)), vNow = ppm.toValue(self._cross.y);
-        if (dd.handle === "p2") { dd.d.t2 = tNow; dd.d.p2 = vNow; }
+        if (dd.handle === "size") {
+          if (dd._fs0 === undefined) { dd._fs0 = dd.d.size || 12; dd._ys = self._cross.y; }
+          dd.d.size = clamp(Math.round(dd._fs0 + (self._cross.y - dd._ys) * 0.25), 8, 64);
+        }
+        else if (dd.handle === "p2") { dd.d.t2 = tNow; dd.d.p2 = vNow; }
         else if (dd.handle === "p1") { dd.d.t1 = tNow; dd.d.p1 = vNow; }
         else {
           var dt = tNow - dd.t0, dv = vNow - dd.v0;
@@ -1332,8 +1397,18 @@
           });
           self.setTool(null);
           if (self._toolDoneCb) self._toolDoneCb();
+        } else if (self._draft) {
+          // second click of the two-click flow: commit where the preview is
+          self._draft.t2 = t0; self._draft.p2 = v0;
+          self.drawings.push(self._draft);
+          self._selected = self._draft.id;
+          self._draft = null;
+          self.setTool(null);
+          if (self._toolDoneCb) self._toolDoneCb();
+          self._persist();
+          self._paintDrawings();
         } else {
-          self._draft = { id: newId(), type: self.tool, t1: t0, p1: v0, t2: t0, p2: v0 };
+          self._draft = { id: newId(), type: self.tool, t1: t0, p1: v0, t2: t0, p2: v0, _x0: x, _y0: y };
         }
         e.preventDefault();
         return;
@@ -1366,14 +1441,30 @@
       drag = null;
       if (self._draft) {
         var f = self._draft;
-        if (f.t1 !== f.t2 || f.p1 !== f.p2) { self.drawings.push(f); self._selected = f.id; self._persist(); }
+        var movedPx = self._cross ? Math.abs(self._cross.x - f._x0) + Math.abs(self._cross.y - f._y0) : 0;
+        // released after a real drag → classic drag-to-draw commit;
+        // released in place → the draft stays armed for the second click
+        if (movedPx > 6) {
+          delete f._x0; delete f._y0;
+          self.drawings.push(f);
+          self._selected = f.id;
+          self._draft = null;
+          self.setTool(null);
+          if (self._toolDoneCb) self._toolDoneCb();
+          self._persist();
+          self._paintDrawings();
+        }
+      }
+      if (self._dragDraw) { self._dragDraw = null; self._persist(); }
+      self._sepDrag = null;
+    });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && self._draft) {
         self._draft = null;
         self.setTool(null);
         if (self._toolDoneCb) self._toolDoneCb();
         self._paintDrawings();
       }
-      if (self._dragDraw) { self._dragDraw = null; self._persist(); }
-      self._sepDrag = null;
     });
     // Delete removes the selection — but never while typing in a form field.
     window.addEventListener("keydown", function (e) {
@@ -1386,6 +1477,7 @@
     });
     el.addEventListener("dblclick", function (e) {
       var r = el.getBoundingClientRect();
+      if (e.clientX - r.left > self._plotW()) { self._vZoom = 1; self._paint(); return; }
       var hit = self._hitTest(e.clientX - r.left, e.clientY - r.top);
       if (hit && hit.d.type === "text") {
         var ask = self.opt.textPrompt || function (initial, cb) { cb(window.prompt("Text:", initial || "")); };
@@ -1402,6 +1494,13 @@
       stopGlide();
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left;
+      // over the price axis the wheel stretches the vertical scale — the
+      // grid gets denser or sparser, TV-style; dblclick there resets
+      if (x > self._plotW()) {
+        self._vZoom = clamp(self._vZoom * Math.exp(e.deltaY * 0.0015), 0.15, 8);
+        self._paint();
+        return;
+      }
       // A Mac trackpad swipes horizontally with deltaX: that is a PAN, the
       // way every charting tool treats it. Vertical wheel stays zoom.
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
@@ -1553,7 +1652,7 @@
   };
 
   global.TRCharts = {
-    version: "0.9.0",
+    version: "0.10.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };

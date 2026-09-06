@@ -6,7 +6,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.9.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
+**Status: v0.10.** Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
 retracement, text) with selection, move, resize, delete and per-key
@@ -51,6 +51,11 @@ engine pass `ui: false` and drive the same APIs themselves.
 - [x] Markers (arrows/circles with text, above/below bars)
 - [ ] Per-bar coloring API
 - [x] Kinetic scroll (momentum glide with decay); pinch anchor refinement pending
+- [x] Two-click drawing (click, move, click — drag still works; Esc aborts)
+- [x] Resizable text (drag the size grip on the selection)
+- [x] Symbol header (ticker · timeframe · live price · change)
+- [x] Vertical price zoom on the axis wheel (dblclick resets)
+- [x] Fullscreen button
 - [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates
 
 ## License
