@@ -24,7 +24,7 @@ high-DPI rendering. No third-party rendering code: every line in `src/`
 is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
-**Status: v0.21 — in production.** Since 7 Sep 2026 this engine renders
+**Status: 1.0.0 — in production.** Since 7 Sep 2026 this engine renders
 every chart on [traderead.ai](https://traderead.ai): the interactive
 widget, the AI-read captures and the images posted to X. Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
