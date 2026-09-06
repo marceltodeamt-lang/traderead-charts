@@ -29,8 +29,8 @@
 <div id="readout"></div>
 <script src="../src/traderead-charts.js"></script>
 <script>
-  var TFS = [["1m",60],["2m",120],["3m",180],["5m",300],["15m",900],["30m",1800],["1H",3600],["4H",14400],["1D",86400],["1W",604800],["1M","1M"],["1Y","1Y"]];
-  var PRO_TFS = { "2m": 1, "3m": 1, "1M": 1, "1Y": 1 };   // marcate vizual ca Pro in demo
+  var TFS = [["1m",60],["2m",120],["3m",180],["5m",300],["15m",900],["30m",1800],["1H",3600],["4H",14400],["1D",86400],["2D",172800],["3D",259200],["1W",604800],["1M","1M"],["1Y","1Y"]];
+  var PRO_TFS = { "2m": 1, "3m": 1, "2D": 1, "3D": 1, "1M": 1, "1Y": 1 };   // marcate vizual ca Pro in demo
   var tfSec = 3600, bars = [];
   function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var v = Math.imul(seed ^ seed >>> 15, 1 | seed); v = v + Math.imul(v ^ v >>> 7, 61 | v) ^ v; return ((v ^ v >>> 14) >>> 0) / 4294967296; }; }
   function genBars() {
@@ -71,7 +71,8 @@
   }
   // native unde exista; 2m se agrega din 1m, 1Y din 1M — TRCharts.resample
   var TF_BINANCE = { 60: "1m", 180: "3m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h", 14400: "4h", 86400: "1d", 604800: "1w", "1M": "1M" };
-  var TF_DERIVED = { 120: { from: "1m", spec: 120 }, "1Y": { from: "1M", spec: "1Y" } };
+  var TF_DERIVED = { 120: { from: "1m", spec: 120 }, 172800: { from: "1d", spec: 172800 },
+    259200: { from: "1d", spec: 259200 }, "1Y": { from: "1M", spec: "1Y" } };
   var liveSymbol = null;   // null = datele sintetice
   function loadReal(item) {
     var drv = TF_DERIVED[tfSec];
