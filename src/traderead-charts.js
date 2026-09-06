@@ -1,8 +1,9 @@
 /*!
- * TradeRead Charts v0.10.0
+ * TradeRead Charts v1.0.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
- * Original work, written from first principles. TradeRead Community License
- * (see LICENSE.md): free to use, the TradeRead mark stays visible.
+ * Original work, written from first principles.
+ * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
+ * commercially - the TradeRead mark stays visible.
  */
 (function (global) {
   "use strict";
@@ -2092,7 +2093,7 @@
   }
 
   global.TRCharts = {
-    version: "0.21.0",
+    version: "1.0.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },

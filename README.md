@@ -75,13 +75,15 @@ engine pass `ui: false` and drive the same APIs themselves.
 - **Standard** (this repo, free): everything you see, up to 4 indicators
   per chart (`maxIndicators: 4`), standard timeframes incl. 30m, TradeRead
   mark required.
-- **Pro** (paid, private): unlimited indicators, custom timeframes — the
+- **Pro** (paid, private repo — contact via traderead.ai): unlimited indicators, custom timeframes — the
   bundled `TRCharts.resample()` turns any finer feed into 2m/3m or the
   calendar frames 1M/1Y, so custom frames work with every data source.
   Client-side limits are honesty gates, not DRM: the licence is the
   enforcement, as with every client-side library.
 
 ## License
-Free for commercial and personal use under the TradeRead Community
-License: any public page that renders charts with this engine must show
-the TradeRead mark (built in, on by default). See LICENSE.md.
+**TradeRead Community License 1.0** — free for personal and commercial
+use, modification and redistribution. One condition: any public page or
+image that shows charts rendered by this engine keeps the TradeRead mark
+visible (it is built in and on by default), or an equivalent "Charts by
+TradeRead" notice linking to traderead.ai. Full text in LICENSE.md.

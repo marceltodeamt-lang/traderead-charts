@@ -1,0 +1,12 @@
+{
+  "name": "traderead-charts",
+  "version": "1.0.0",
+  "description": "Complete financial charting widget — candlesticks, indicators with a TradingView-style panel, drawing tools, symbol search, themes. Batteries included, zero dependencies, in production on traderead.ai.",
+  "main": "src/traderead-charts.js",
+  "files": ["src", "LICENSE.md", "README.md"],
+  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Marcel Todea / TradeRead (https://traderead.ai)",
+  "repository": { "type": "git", "url": "https://github.com/marceltodeamt-lang/traderead-charts.git" },
+  "keywords": ["charts", "candlestick", "financial", "trading", "canvas", "indicators", "rsi", "macd", "drawing-tools", "widget"],
+  "sideEffects": true
+}
