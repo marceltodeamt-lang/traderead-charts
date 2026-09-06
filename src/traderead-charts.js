@@ -1050,8 +1050,9 @@
   };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
   Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
-  // One selected drawing = one floating style chip: its color (box and text
-  // alike) is editable and persisted per drawing (owner, 7 Sep 2026).
+  // The style bar floats NEXT TO the selected drawing (the corner chip went
+  // unseen — owner, 7 Sep 2026): color + delete, tracking the shape as it
+  // moves, clamped inside the plot.
   Chart.prototype._syncStyleChip = function () {
     var self = this, o = this.opt;
     var d = null;
@@ -1060,19 +1061,39 @@
     if (!this._styleChip) {
       var chip = document.createElement("div");
       chip.className = "trc-style";
-      chip.style.cssText = "position:absolute;left:44px;bottom:" + (o.timeAxisHeight + 10) + "px;z-index:7;" +
-        "display:flex;align-items:center;gap:7px;background:" + o.background + ";border:1px solid " + o.separatorColor + ";" +
-        "border-radius:10px;padding:6px 9px;color:" + o.textColor + ";font:700 11px -apple-system,'Segoe UI',sans-serif;";
-      chip.innerHTML = '<span>Color</span><input type="color" style="width:20px;height:20px;padding:0;border:none;border-radius:5px;background:none;cursor:pointer;">';
+      chip.style.cssText = "position:absolute;z-index:9;display:flex;align-items:center;gap:6px;" +
+        "background:" + o.background + ";border:1px solid " + o.separatorColor + ";" +
+        "border-radius:10px;padding:5px 7px;box-shadow:0 6px 20px rgba(0,0,0,0.35);";
+      chip.innerHTML =
+        '<input type="color" title="Color" style="width:22px;height:22px;padding:0;border:none;border-radius:6px;background:none;cursor:pointer;">' +
+        '<button type="button" data-act="del" title="Delete (Del)" style="border:none;background:none;color:' + o.textColor + ';cursor:pointer;width:22px;height:22px;font:700 13px -apple-system,sans-serif;line-height:1;">' +
+        SVGI('<line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/>') + "</button>";
       chip.querySelector("input").addEventListener("input", function () {
         var sel2 = null;
         for (var j = 0; j < self.drawings.length; j++) if (self.drawings[j].id === self._selected) sel2 = self.drawings[j];
         if (sel2) { sel2.color = this.value; self._persist(); self._paintDrawings(); }
       });
+      chip.querySelector('[data-act="del"]').addEventListener("click", function () { self.deleteSelected(); });
       this.el.appendChild(chip);
       this._styleChip = chip;
     }
     this._styleChip.querySelector("input").value = d.color || DRAW_COLOR;
+    this._placeStyleChip(d);
+  };
+  Chart.prototype._placeStyleChip = function (d) {
+    if (!this._styleChip) return;
+    var pp = this.panes[0];
+    var xs = [], ys = [];
+    if (isNum(d.t1)) { xs.push(this.timeToX(d.t1)); }
+    if (isNum(d.t2)) { xs.push(this.timeToX(d.t2)); }
+    if (isNum(d.p1)) { ys.push(pp.toY(d.p1)); }
+    if (isNum(d.p2)) { ys.push(pp.toY(d.p2)); }
+    if (d.type === "hline") { xs = [this._plotW() / 2]; }
+    var x = xs.length ? Math.min.apply(null, xs) : 20;
+    var y = ys.length ? Math.min.apply(null, ys) : 20;
+    var w = this._styleChip.offsetWidth || 64, h = this._styleChip.offsetHeight || 34;
+    this._styleChip.style.left = clamp(x, 46, this._plotW() - w - 6) + "px";
+    this._styleChip.style.top = clamp(y - h - 10, 4, this._plotH() - h - 4) + "px";
   };
 
   Chart.prototype.deleteSelected = function () {
@@ -1116,6 +1137,11 @@
 
   Chart.prototype._paintDrawings = function () {
     var c = this.dctx, W = this._plotW(), pp = this.panes[0], self = this;
+    if (this._selected && this._styleChip) {
+      for (var si = 0; si < this.drawings.length; si++) {
+        if (this.drawings[si].id === this._selected) { this._placeStyleChip(this.drawings[si]); break; }
+      }
+    }
     c.clearRect(0, 0, this.w, this.h);
     var dec = stepDecimals(niceStep(pp.max - pp.min, 8));
     var list = this._draft ? this.drawings.concat([this._draft]) : this.drawings;
@@ -1964,7 +1990,7 @@
   }
 
   global.TRCharts = {
-    version: "0.17.0",
+    version: "0.17.1",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
