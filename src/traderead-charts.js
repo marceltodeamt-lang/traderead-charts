@@ -391,8 +391,11 @@
       list.forEach(function (ind) {
         var def = IND_DEFS[ind.kind];
         h += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;" data-row="' + ind.id + '">' +
-          '<span style="width:9px;height:9px;border-radius:3px;background:' + (ind.color || "#8b949e") + ';"></span>' +
-          '<span style="flex:1;">' + def.label + '</span>';
+          '<input type="color" data-color="' + ind.id + '" value="' + (ind.color || "#8b949e") + '" title="Line color" ' +
+            'style="width:18px;height:18px;padding:0;border:none;border-radius:4px;background:none;cursor:pointer;">' +
+          '<input type="text" data-label="' + ind.id + '" value="' + (ind.label || "") + '" placeholder="' + def.label + '" title="Rename" ' +
+            'style="flex:1;min-width:60px;background:none;border:1px solid transparent;border-radius:5px;color:inherit;font:inherit;padding:1px 4px;" ' +
+            'onfocus="this.style.borderColor=\'rgba(139,148,158,0.4)\'" onblur="this.style.borderColor=\'transparent\'">';
         Object.keys(ind.params).forEach(function (k) {
           h += '<input data-ind="' + ind.id + '" data-k="' + k + '" type="number" step="any" value="' + ind.params[k] + '" ' +
             'style="width:42px;background:none;border:1px solid ' + o.separatorColor + ';border-radius:5px;color:inherit;font:inherit;padding:1px 3px;">';
@@ -410,6 +413,16 @@
       });
       p.querySelectorAll("[data-del]").forEach(function (b) {
         b.addEventListener("click", function () { self.removeIndicator(b.getAttribute("data-del")); repaint(); });
+      });
+      p.querySelectorAll("input[data-color]").forEach(function (inp) {
+        inp.addEventListener("change", function () {
+          self.setIndicatorStyle(inp.getAttribute("data-color"), { color: inp.value });
+        });
+      });
+      p.querySelectorAll("input[data-label]").forEach(function (inp) {
+        inp.addEventListener("change", function () {
+          self.setIndicatorStyle(inp.getAttribute("data-label"), { label: inp.value.trim() });
+        });
       });
       p.querySelectorAll("input[data-ind]").forEach(function (inp) {
         inp.addEventListener("change", function () {
@@ -828,6 +841,16 @@
     this._applyIndicators();
     this._persistInd();
   };
+  Chart.prototype.setIndicatorStyle = function (id, style) {
+    for (var i = 0; i < this.indicators.length; i++) {
+      if (this.indicators[i].id === id) {
+        if (style && style.color) this.indicators[i].color = style.color;
+        if (style && "label" in style) this.indicators[i].label = style.label || undefined;
+      }
+    }
+    this._applyIndicators();
+    this._persistInd();
+  };
   Chart.prototype.getIndicators = function () { return this.indicators.slice(); };
   // Per-bar markers: entries, exits, signals. Sorted once; drawn above the
   // bar's high or below its low with a small gap that scales with spacing.
@@ -890,7 +913,7 @@
     var html = "";
     for (var i = 0; i < this.indicators.length; i++) {
       var ind = this.indicators[i], def = IND_DEFS[ind.kind];
-      var label = def.label + (ind.params.p ? " " + ind.params.p : ind.kind === "macd" ? " " + ind.params.f + "/" + ind.params.s + "/" + ind.params.sig : ind.kind === "stoch" ? " " + ind.params.k + "/" + ind.params.d + "/" + ind.params.s : "");
+      var label = ind.label || (def.label + (ind.params.p ? " " + ind.params.p : ind.kind === "macd" ? " " + ind.params.f + "/" + ind.params.s + "/" + ind.params.sig : ind.kind === "stoch" ? " " + ind.params.k + "/" + ind.params.d + "/" + ind.params.s : ""));
       var val = "";
       if (t !== null && ind._legendRef) {
         var v = ind._legendRef.byTime.get(t);
@@ -945,9 +968,9 @@
     this.indicators.forEach(function (ind) {
       var P = ind.params, key = "@" + ind.id;
       var defL = IND_DEFS[ind.kind];
-      var indLabel = defL.label + (P.p ? " " + P.p
+      var indLabel = ind.label || (defL.label + (P.p ? " " + P.p
         : ind.kind === "macd" ? " " + (P.f || 12) + "/" + (P.s || 26) + "/" + (P.sig || 9)
-        : ind.kind === "stoch" ? " " + (P.k || 14) + "/" + (P.d || 3) + "/" + (P.s || 3) : "");
+        : ind.kind === "stoch" ? " " + (P.k || 14) + "/" + (P.d || 3) + "/" + (P.s || 3) : ""));
       if (ind.kind === "ema") self.addLine(key, calcEMA(bars, P.p || 20), ind.color, 1.4);
       else if (ind.kind === "sma") self.addLine(key, calcSMA(bars, P.p || 50), ind.color, 1.4);
       else if (ind.kind === "vwap") self.addLine(key, calcVWAP(bars), ind.color, 1.4);
@@ -1874,7 +1897,7 @@
   };
 
   global.TRCharts = {
-    version: "0.14.0",
+    version: "0.15.0",
     themes: THEMES,
     createChart: function (el, options) { return new Chart(el, options); },
   };
