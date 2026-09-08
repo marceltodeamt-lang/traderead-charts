@@ -33,6 +33,7 @@
     autoScalePadPct: 0.08,
     oscPaneHeight: 110,       // default px height of an oscillator pane
     minPricePaneFrac: 0.45,   // price pane never shrinks below this share
+    onFullscreenToggle: null, // host override: an iframe cannot fullscreen itself on iOS
     logo: true,
     ui: true,
     maxIndicators: 0,       // 0 = unlimited (Pro); Standard builds pass 4               // the bundled rail + indicator panel + type switcher + camera
@@ -126,6 +127,10 @@
       var mid = (min + max) / 2, halfR = (max - min) / 2 * this.chart._vZoom;
       min = mid - halfR; max = mid + halfR;
     }
+    if (this.kind === "price" && this.chart._vOff) {
+      var sh = (max - min) * this.chart._vOff;
+      min += sh; max += sh;
+    }
     this.min = min; this.max = max;
   };
 
@@ -145,6 +150,8 @@
     this._saveT = null;
     this._sepDrag = null;           // {i, y0, h0} while a pane separator is dragged
     this._vZoom = 1;                // vertical stretch of the price pane (wheel on the axis)
+    this._vOff = 0;                 // vertical pan of the price pane, in range fractions
+    this._axisDrag = null;          // {axis:"price"|"time", ...} while an axis is being dragged
     this.indicators = [];           // built-in indicator list (see addIndicator)
     this._indColor = 0;
     this.chartType = "candles";     // "candles" | "bars" | "line" | "area" | "baseline"
@@ -216,11 +223,20 @@
     var rail = document.createElement("div");
     rail.className = "trc-rail";
     rail.style.cssText = "position:absolute;left:8px;top:10px;z-index:6;display:flex;flex-direction:column;gap:3px;" +
-      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:10px;padding:4px;";
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:10px;padding:4px;" +
+      // a phone-height frame is shorter than the tool column: the rail
+      // scrolls so the bottom buttons (camera, share, fit) stay reachable
+      "overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;flex-shrink:0;";
+    if (!document.getElementById("trc-style")) {
+      var st = document.createElement("style");
+      st.id = "trc-style";
+      st.textContent = ".trc-rail::-webkit-scrollbar{display:none}";
+      document.head.appendChild(st);
+    }
     function btn(icon, tip, fn) {
       var b = document.createElement("button");
       b.type = "button"; b.innerHTML = icon; b.title = tip;
-      b.style.cssText = "border:none;background:none;color:" + o.textColor + ";width:26px;height:26px;" +
+      b.style.cssText = "border:none;background:none;color:" + o.textColor + ";width:26px;height:26px;flex-shrink:0;" +
         "border-radius:7px;cursor:pointer;font:700 13px -apple-system,'Segoe UI',sans-serif;line-height:1;";
       b.addEventListener("click", function () { fn(b); });
       rail.appendChild(b);
@@ -240,9 +256,9 @@
     this.onToolDone(function () { mark(toolBtns.cursor); });
     btn(ICONS.trash, "Delete selected (Del)", function () { self.deleteSelected(); });
     var sep = document.createElement("div");
-    sep.style.cssText = "height:1px;background:" + o.separatorColor + ";margin:3px 2px;";
+    sep.style.cssText = "height:1px;background:" + o.separatorColor + ";margin:3px 2px;flex-shrink:0;";
     rail.appendChild(sep);
-    btn(ICONS.ind, "Indicators", function () { self._toggleIndPanel(); });
+    this._indBtn = btn(ICONS.ind, "Indicators", function () { self._toggleIndPanel(); });
     var typeBtn = btn(ICONS.candles, "Chart type", function () { self._toggleTypeMenu(typeBtn); });
     this._typeBtn = typeBtn;
     btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
@@ -264,20 +280,53 @@
       "display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.25);";
     fsBtn.addEventListener("mouseenter", function () { fsBtn.style.background = "rgba(99,102,241,0.4)"; });
     fsBtn.addEventListener("mouseleave", function () { fsBtn.style.background = "rgba(99,102,241,0.22)"; });
+    this._fsIcons = { on: fsExit, off: fsIcon };
     fsBtn.addEventListener("click", function () {
+      // a host override wins: inside an iframe the embedding page must
+      // maximize the frame (iOS has no element-fullscreen API at all)
+      if (o.onFullscreenToggle) { o.onFullscreenToggle(); return; }
       var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (fsEl === self.el) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
       else if (self.el.requestFullscreen) self.el.requestFullscreen();
       else if (self.el.webkitRequestFullscreen) self.el.webkitRequestFullscreen();
-      // iOS Safari has no element fullscreen: the host page should maximize
-      // the container instead (the production widget does exactly that).
+      else self._toggleFakeFullscreen();
     });
     document.addEventListener("fullscreenchange", function () {
-      fsBtn.innerHTML = document.fullscreenElement === self.el ? fsExit : fsIcon;
+      self.setMaximized(document.fullscreenElement === self.el);
     });
     this.el.appendChild(fsBtn);
     this._fsBtn = fsBtn;
     this._fitLogo();
+  };
+
+  // The host (or a native fullscreenchange) reports the state; the button
+  // swaps its icon to match.
+  Chart.prototype.setMaximized = function (on) {
+    if (this._fsBtn && this._fsIcons) this._fsBtn.innerHTML = on ? this._fsIcons.on : this._fsIcons.off;
+  };
+  // iOS Safari fallback: pin the container to the viewport. Restoring puts
+  // back the exact inline style the element had.
+  Chart.prototype._toggleFakeFullscreen = function () {
+    if (this._fakeFS != null) {
+      this.el.style.cssText = this._fakeFS;
+      this._fakeFS = null;
+    } else {
+      this._fakeFS = this.el.style.cssText;
+      this.el.style.cssText += ";position:fixed;top:0;left:0;width:100vw;height:100vh;margin:0;z-index:2147483000;background:" + (this.opt.background || "#0d1117") + ";";
+    }
+    this.setMaximized(this._fakeFS != null);
+    this._resize();
+  };
+  // Menus close on any tap outside them. The anchor button is exempt — its
+  // own toggle handles that tap, otherwise close-then-reopen double-fires.
+  Chart.prototype._armOutsideClose = function (box, anchorBtn, close) {
+    var h = function (e) {
+      if (!box.isConnected) { document.removeEventListener("pointerdown", h, true); return; }
+      if (box.contains(e.target) || (anchorBtn && anchorBtn.contains(e.target))) return;
+      document.removeEventListener("pointerdown", h, true);
+      close();
+    };
+    document.addEventListener("pointerdown", h, true);
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
@@ -388,6 +437,7 @@
     this.el.appendChild(m);
     fitMenu();
     this._typeMenu = m;
+    this._armOutsideClose(m, this._typeBtn, function () { m.remove(); self._typeMenu = null; });
   };
 
   Chart.prototype._toggleIndPanel = function () {
@@ -454,6 +504,7 @@
     var hP = p.offsetHeight || 0, maxTopP = this._plotH() - hP - 6;
     if (10 > maxTopP) p.style.top = Math.max(6, maxTopP) + "px";
     this._indPanel = p;
+    this._armOutsideClose(p, this._indBtn, function () { p.remove(); self._indPanel = null; });
   };
 
   Chart.prototype._composite = function () {
@@ -608,6 +659,7 @@
     var left = 8;
     var rail = this.el.querySelector(".trc-rail");
     if (rail) {
+      rail.style.maxHeight = Math.max(96, (this.h || this.el.clientHeight || 600) - this.opt.timeAxisHeight - 20) + "px";
       var railBottom = rail.offsetTop + rail.offsetHeight;
       var logoH = small ? 24 : 42;
       var logoTop = (this.h || this.el.clientHeight || 600) - this.opt.timeAxisHeight - 8 - logoH;
@@ -1156,7 +1208,7 @@
   // touch: without touch-action none the browser steals the gesture, fires
   // a cancel and kills the line mid-draw (paid for once in production).
   Chart.prototype._touchLock = function () {
-    this.overlay.style.touchAction = (this.tool || this._draft || this._dragDraw || this._sepDrag) ? "none" : "";
+    this.overlay.style.touchAction = (this.tool || this._draft || this._dragDraw || this._sepDrag || this._axisDrag) ? "none" : "";
   };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
   Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
@@ -1389,6 +1441,7 @@
     this.barSpacing = this.opt.barSpacing;
     this.rightIndex = this.bars.length - 1;
     this._vZoom = 1;
+    this._vOff = 0;
     this._paint();
   };
   Chart.prototype.remove = function () { this._ro.disconnect(); this.el.innerHTML = ""; };
@@ -1793,6 +1846,13 @@
         self._paintCross();
         return;
       }
+      if (self._axisDrag) {
+        var ad = self._axisDrag;
+        if (ad.axis === "price") self._vZoom = clamp(ad.z0 * Math.exp((self._cross.y - ad.y0) * 0.004), 0.15, 8);
+        else self.barSpacing = clamp(ad.s0 * Math.exp((self._cross.x - ad.x0) * 0.004), self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        self._paint();
+        return;
+      }
       if (self._sepDrag) {
         var sd = self._sepDrag;
         // dragging DOWN moves the pane's top edge down = the pane shrinks
@@ -1833,15 +1893,23 @@
         glide.lastX = nowX; glide.lastT = nowT;
         self.rightIndex = drag.right0 + (drag.x0 - nowX) / self.barSpacing;
         self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        if (drag.vpan) {
+          var us = self.panes[0].h * (1 - self.opt.volumeHeightPct * 0.35) || 1;
+          self._vOff = drag.off0 + (e.clientY - r.top - drag.y0) / us;
+        }
         self._paint();
       } else self._paintCross();
     });
-    el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._paintCross(); self._paintLegend(null); if (self.crosshairCb) self.crosshairCb(null); });
+    el.addEventListener("mouseleave", function () { self._cross = null; drag = null; self._axisDrag = null; self._paintCross(); self._paintLegend(null); if (self.crosshairCb) self.crosshairCb(null); });
     function newId() { return "d" + Math.round(performance.now() * 1000) + "_" + self.drawings.length; }
     el.addEventListener("mousedown", function (e) {
       var r = el.getBoundingClientRect();
       var x = e.clientX - r.left, y = e.clientY - r.top;
       var pp = self.panes[0];
+      // dragging the price axis stretches the scale, the time axis stretches
+      // bar spacing — the same gestures TradingView trains everyone on
+      if (x > self._plotW()) { stopGlide(); self._axisDrag = { axis: "price", y0: y, z0: self._vZoom }; e.preventDefault(); return; }
+      if (y > self._plotH()) { stopGlide(); self._axisDrag = { axis: "time", x0: x, s0: self.barSpacing }; e.preventDefault(); return; }
       if (self.tool && self._paneAt(y) === pp) {
         var t0 = self.indexToTime(self.xToIndex(x)), v0 = pp.toValue(y);
         if (self.tool === "hline") {
@@ -1899,12 +1967,13 @@
       if (self._selected) { self._selected = null; self._syncStyleChip(); self._paintDrawings(); }
       stopGlide();
       glide.lastX = x; glide.lastT = 0;
-      drag = { x0: x, right0: self.rightIndex };
+      drag = { x0: x, right0: self.rightIndex, y0: y, off0: self._vOff, vpan: self._paneAt(y) === pp };
       e.preventDefault();
     });
     window.addEventListener("mouseup", function () {
       if (drag) startGlide();
       drag = null;
+      self._axisDrag = null;
       if (self._draft) {
         var f = self._draft;
         var movedPx = self._cross ? Math.abs(self._cross.x - f._x0) + Math.abs(self._cross.y - f._y0) : 0;
@@ -1944,7 +2013,7 @@
     });
     el.addEventListener("dblclick", function (e) {
       var r = el.getBoundingClientRect();
-      if (e.clientX - r.left > self._plotW()) { self._vZoom = 1; self._paint(); return; }
+      if (e.clientX - r.left > self._plotW()) { self._vZoom = 1; self._vOff = 0; self._paint(); return; }
       var hit = self._hitTest(e.clientX - r.left, e.clientY - r.top);
       if (hit && hit.d.type === "text") {
         var ask = self.opt.textPrompt || function (initial, cb) { cb(window.prompt("Text:", initial || "")); };
@@ -1988,6 +2057,8 @@
       if (e.touches.length === 1) {
         var tx = e.touches[0].clientX - r.left, ty = e.touches[0].clientY - r.top;
         var pp = self.panes[0];
+        if (tx > self._plotW()) { stopGlide(); self._axisDrag = { axis: "price", y0: ty, z0: self._vZoom }; self._touchLock(); return; }
+        if (ty > self._plotH()) { stopGlide(); self._axisDrag = { axis: "time", x0: tx, s0: self.barSpacing }; self._touchLock(); return; }
         if (self.tool && self._paneAt(ty) === pp) {
           var t0 = self.indexToTime(self.xToIndex(tx)), v0 = pp.toValue(ty);
           if (self.tool === "hline") {
@@ -2021,7 +2092,7 @@
         }
         stopGlide();
         glide.lastX = tx; glide.lastT = 0;
-        drag = { x0: tx, right0: self.rightIndex };
+        drag = { x0: tx, right0: self.rightIndex, y0: ty, off0: self._vOff, vpan: self._paneAt(ty) === pp };
       } else if (e.touches.length === 2) {
         // a second finger means navigation: commit whatever was in flight
         if (self._draft) { self.drawings.push(self._draft); self._selected = self._draft.id; self._draft = null; self._persist(); self._paintDrawings(); }
@@ -2033,6 +2104,15 @@
     }, { passive: true });
     el.addEventListener("touchmove", function (e) {
       var r = el.getBoundingClientRect();
+      if (self._axisDrag && e.touches.length === 1) {
+        var aax = e.touches[0].clientX - r.left, aay = e.touches[0].clientY - r.top;
+        var ad2 = self._axisDrag;
+        if (ad2.axis === "price") self._vZoom = clamp(ad2.z0 * Math.exp((aay - ad2.y0) * 0.004), 0.15, 8);
+        else self.barSpacing = clamp(ad2.s0 * Math.exp((aax - ad2.x0) * 0.004), self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        self._paint();
+        e.preventDefault();
+        return;
+      }
       if (e.touches.length === 1 && (self._draft || self._dragDraw || self._sepDrag)) {
         var tx = e.touches[0].clientX - r.left, ty = e.touches[0].clientY - r.top;
         var pp = self.panes[0];
@@ -2075,6 +2155,10 @@
         glide.lastX = tNowX; glide.lastT = tNowT;
         self.rightIndex = drag.right0 + (drag.x0 - tNowX) / self.barSpacing;
         self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        if (drag.vpan) {
+          var us2 = self.panes[0].h * (1 - self.opt.volumeHeightPct * 0.35) || 1;
+          self._vOff = drag.off0 + (e.touches[0].clientY - r.top - drag.y0) / us2;
+        }
         self._paint();
         e.preventDefault();
       }
@@ -2082,7 +2166,7 @@
     function endTouch(e) {
       if (e.touches.length) return;
       if (drag) startGlide();
-      drag = null; pinch = null;
+      drag = null; pinch = null; self._axisDrag = null;
       if (self._draft) {
         var f = self._draft;
         if (f.t1 !== f.t2 || f.p1 !== f.p2) { self.drawings.push(f); self._selected = f.id; self._persist(); }
