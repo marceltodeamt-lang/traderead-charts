@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 — 2026-09-13
+
+First npm release (`npm install traderead-charts`). Since 1.0.0:
+
+- **Mobile**: fullscreen host-override + iOS fake-fullscreen fallback,
+  scrollable tool rail in short frames, price/time axis drag zoom,
+  one-finger vertical pan of the price pane, menus close on outside tap.
+- **Small embeds**: type menu and indicator panel clamp inside the frame,
+  pane titles clear the tool rail, compact logo under 560px that slides
+  aside when the rail would overlap it.
+- **Attribution**: the badge link carries `utm_source=widget`; hosts can
+  override it via the `logoHref` option.
+
 ## 1.0.0 — 7 Sep 2026
 First production release. The engine renders every chart on
 traderead.ai: the interactive widget, the AI-read captures and the
