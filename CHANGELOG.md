@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 — 2026-09-13
+
+- **In-widget timeframe picker** (`timeframes: {list, active, onSelect}`):
+  the host page's own TF buttons disappear under a fullscreen widget —
+  the pill in the header opens a grid menu that rides inside the frame,
+  works in fullscreen, closes on outside tap.
+
 ## 1.1.0 — 2026-09-13
 
 First npm release (`npm install traderead-charts`). Since 1.0.0:

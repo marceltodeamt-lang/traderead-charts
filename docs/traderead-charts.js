@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.1.0
+ * TradeRead Charts v1.2.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
@@ -35,6 +35,11 @@
     minPricePaneFrac: 0.45,   // price pane never shrinks below this share
     onFullscreenToggle: null, // host override: an iframe cannot fullscreen itself on iOS
     logoHref: null,           // override the badge link (default carries utm_source=widget)
+    // {list:[{label,value}...], active, onSelect(value)} — an in-widget
+    // timeframe picker. The host page's own TF buttons disappear under a
+    // fullscreen widget (owner's find, 12 Sep 2026); inside the frame the
+    // picker survives every mode.
+    timeframes: null,
     logo: true,
     ui: true,
     maxIndicators: 0,       // 0 = unlimited (Pro); Standard builds pass 4               // the bundled rail + indicator panel + type switcher + camera
@@ -1015,14 +1020,21 @@
       var h = document.createElement("div");
       h.className = "trc-header";
       var clickable = !!(this.opt.symbolSearch && this.opt.symbolSearch.search);
+      var hasTf = !!(this.opt.timeframes && this.opt.timeframes.list && this.opt.timeframes.list.length);
       h.style.cssText = "position:absolute;left:" + (this.opt.ui ? 56 : 12) + "px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
         "font:800 15px -apple-system,'Segoe UI',sans-serif;user-select:none;" +
-        (clickable ? "cursor:pointer;" : "pointer-events:none;");
-      if (clickable) {
-        var self2 = this;
-        h.title = "Search ticker or name";
-        h.addEventListener("click", function () { self2._toggleSearch(); });
-      }
+        (clickable ? "cursor:pointer;" : (hasTf ? "" : "pointer-events:none;"));
+      var self2 = this;
+      if (clickable) h.title = "Search ticker or name";
+      // delegare: pastila de TF se reconstruieste la fiecare _paintHeader
+      h.addEventListener("click", function (e) {
+        if (hasTf && e.target.closest && e.target.closest(".trc-tf-btn")) {
+          e.stopPropagation();
+          self2._toggleTfMenu();
+          return;
+        }
+        if (clickable) self2._toggleSearch();
+      });
       this.el.appendChild(h);
       this._header = h;
     }
@@ -1042,11 +1054,50 @@
     var up = chg !== null && chg >= 0;
     this._header.innerHTML =
       '<span style="color:' + (o.tagText || "#e6edf3") + ';font-size:17px;">' + (inf.ticker || "") + "</span>" +
-      (inf.tf ? '<span style="color:' + o.textColor + ';font-weight:700;font-size:12px;">' + inf.tf + "</span>" : "") +
+      (this.opt.timeframes && this.opt.timeframes.list && this.opt.timeframes.list.length
+        ? '<span class="trc-tf-btn" title="Change timeframe" style="color:' + o.textColor + ';font-weight:700;font-size:12px;' +
+          'border:1px solid ' + o.separatorColor + ';border-radius:6px;padding:1px 8px;cursor:pointer;">' +
+          (this._activeTfLabel() || inf.tf || "TF") + " \u25BE</span>"
+        : (inf.tf ? '<span style="color:' + o.textColor + ';font-weight:700;font-size:12px;">' + inf.tf + "</span>" : "")) +
       (px ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';">' + px + "</span>" : "") +
       (chg !== null ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';font-weight:700;font-size:12px;">' +
         (up ? "+" : "") + chg.toFixed(2) + "%</span>" : "") +
       (inf.title ? '<span style="color:' + o.textColor + ';font-weight:600;font-size:12px;">' + inf.title + "</span>" : "");
+  };
+
+  Chart.prototype._activeTfLabel = function () {
+    var t = this.opt.timeframes;
+    if (!t || !t.list) return null;
+    for (var i = 0; i < t.list.length; i++) if (t.list[i].value === t.active) return t.list[i].label;
+    return null;
+  };
+  Chart.prototype._toggleTfMenu = function () {
+    var self = this, o = this.opt, t = o.timeframes;
+    if (this._tfMenu) { this._tfMenu.remove(); this._tfMenu = null; return; }
+    if (!t || !t.list) return;
+    var m = document.createElement("div");
+    m.className = "trc-tf-menu";
+    m.style.cssText = "position:absolute;left:" + (o.ui ? 56 : 12) + "px;top:34px;z-index:8;" +
+      "background:" + o.background + ";border:1px solid " + o.separatorColor + ";border-radius:12px;padding:6px;" +
+      "color:" + o.textColor + ";font:12px -apple-system,'Segoe UI',sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.35);" +
+      "display:grid;grid-template-columns:repeat(4,1fr);gap:2px;max-height:70%;overflow:auto;";
+    t.list.forEach(function (it) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = it.label;
+      b.style.cssText = "border:none;background:" + (it.value === t.active ? "rgba(99,102,241,0.25)" : "none") +
+        ";color:inherit;font:inherit;font-weight:700;border-radius:8px;padding:6px 8px;cursor:pointer;text-align:center;";
+      b.addEventListener("click", function () {
+        m.remove(); self._tfMenu = null;
+        if (it.value !== t.active && t.onSelect) t.onSelect(it.value);
+      });
+      m.appendChild(b);
+    });
+    this.el.appendChild(m);
+    var hM = m.offsetHeight || 0, maxTopM = this._plotH() - hM - 6;
+    if (34 > maxTopM) m.style.top = Math.max(6, maxTopM) + "px";
+    this._tfMenu = m;
+    this._armOutsideClose(m, this._header, function () { m.remove(); self._tfMenu = null; });
   };
 
   // The indicator legend with LIVE numbers: label in the series color plus

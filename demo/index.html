@@ -96,6 +96,22 @@
   function tfName() { return TFS.filter(function (t) { return t[1] === tfSec; })[0][0]; }
 
   var chart = TRCharts.createChart(document.getElementById("chart"), {
+    timeframes: {
+      list: TFS.map(function (t) { return { label: t[0] + (PRO_TFS[t[0]] ? "\u2605" : ""), value: String(t[1]) }; }),
+      active: "3600",
+      onSelect: function (v) {
+        var pair = TFS.filter(function (t) { return String(t[1]) === v; })[0];
+        if (!pair) return;
+        tfSec = pair[1];
+        chart.opt.timeframes.active = v;
+        var tfBarEl = document.getElementById("tfs");
+        tfBarEl.querySelectorAll("button").forEach(function (x) {
+          x.className = x.textContent.replace("\u2605", "\u2605") === (PRO_TFS[pair[0]] ? pair[0] + "\u2605" : pair[0]) ? "on" : "";
+        });
+        if (liveSymbol) loadReal(liveSymbol);
+        else load();
+      },
+    },
     symbolSearch: {
       search: function (q, cb) {
         loadSymbols(function (list) {
@@ -133,6 +149,8 @@
     if (tf[1] === tfSec) b.className = "on";
     b.addEventListener("click", function () {
       tfSec = tf[1];
+      chart.opt.timeframes.active = String(tf[1]);
+      chart._paintHeader();
       tfBar.querySelectorAll("button").forEach(function (x) { x.className = x === b ? "on" : ""; });
       if (liveSymbol) loadReal(liveSymbol);
       else load();
