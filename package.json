@@ -13,7 +13,7 @@
   "author": "Marcel Todea / TradeRead (https://traderead.ai)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marceltodeamt-lang/traderead-charts.git"
+    "url": "git+https://github.com/marceltodeamt-lang/traderead-charts.git"
   },
   "keywords": [
     "charts",
