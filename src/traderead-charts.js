@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.0.0
+ * TradeRead Charts v1.1.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including

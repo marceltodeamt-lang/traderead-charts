@@ -49,6 +49,18 @@ params, all persisted per key), a chart-type menu (seven types,
 Heikin Ashi included) and a PNG snapshot that opens a preview with explicit Download / Copy actions — nothing downloads by itself. Hosts that want only the
 engine pass `ui: false` and drive the same APIs themselves.
 
+## Install
+
+```
+npm install traderead-charts
+```
+
+or straight from a CDN, no build step:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/traderead-charts@1.1.0/src/traderead-charts.js"></script>
+```
+
 ## Quick start
 
 ```html
