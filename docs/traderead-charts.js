@@ -34,6 +34,7 @@
     oscPaneHeight: 110,       // default px height of an oscillator pane
     minPricePaneFrac: 0.45,   // price pane never shrinks below this share
     onFullscreenToggle: null, // host override: an iframe cannot fullscreen itself on iOS
+    logoHref: null,           // override the badge link (default carries utm_source=widget)
     logo: true,
     ui: true,
     maxIndicators: 0,       // 0 = unlimited (Pro); Standard builds pass 4               // the bundled rail + indicator panel + type switcher + camera
@@ -608,7 +609,9 @@
     // in its working form, so it stays clickable (owner, 7 Sep 2026).
     var d = document.createElement("a");
     d.className = "trc-logo";
-    d.href = "https://traderead.ai/";
+    // utm_source=widget: clicks from third-party embeds arrive referrer-less
+    // (or under the embedder's domain) — the tag is the only attribution.
+    d.href = this.opt.logoHref || "https://traderead.ai/?utm_source=widget";
     d.target = "_blank";
     d.rel = "noopener";
     // A rounded plate separates the mark from whatever sits behind it — on

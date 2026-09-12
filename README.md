@@ -16,7 +16,7 @@ not a bare canvas.
 - 📱 Touch-first: pinch zoom, one-finger drawing, momentum scrolling
 - 🌗 Light & dark themes, live-switchable
 - ⚡ 50,000 candles load in ~1.4 ms; dense repaint under 1 ms
-- 🏭 In production on [traderead.ai](https://traderead.ai) — the interactive widget, the AI-read captures and every chart posted to X
+- 🏭 In production on [traderead.ai](https://traderead.ai/?utm_source=github) — the interactive widget, the AI-read captures and every chart posted to X
 
 A financial charting engine built from first principles by TradeRead —
 candlesticks, volume, overlays, crosshair, inertia-free pan/zoom, touch,
@@ -25,7 +25,7 @@ is original TradeRead work, written from public behavior specifications,
 so the engine is TradeRead intellectual property in full.
 
 **Status: 1.0.0 — in production.** Since 7 Sep 2026 this engine renders
-every chart on [traderead.ai](https://traderead.ai): the interactive
+every chart on [traderead.ai](https://traderead.ai/?utm_source=github): the interactive
 widget, the AI-read captures and the images posted to X. Candles, volume, line overlays (EMA/VWAP/Bollinger),
 oscillator sub-panes (RSI/MACD/Stochastic) with per-pane scales and
 guides, the full drawing set (trend, horizontal, rectangle, Fibonacci
