@@ -20,14 +20,14 @@
 </head>
 <body>
 <header>
-  <h1>TradeRead Charts v0.17</h1>
+  <h1>TradeRead Charts</h1>
   <div class="grp" id="tfs"></div>
   <div class="grp"><button id="tDark" class="on">Dark</button><button id="tLight">Light</button></div>
 </header>
-<p class="hint">Uneltele de desen, indicatorii (≡), tipul de chart și camera sunt ÎN bibliotecă — pagina asta doar creează chartul.</p>
+<p class="hint">Drawing tools, indicators (≡), chart types, timeframes and the camera are all built INTO the library — this page only creates the chart.</p>
 <div id="chart"></div>
 <div id="readout"></div>
-<script src="traderead-charts.js"></script>
+<script src="../src/traderead-charts.js"></script>
 <script>
   var TFS = [["1m",60],["2m",120],["3m",180],["5m",300],["15m",900],["30m",1800],["1H",3600],["4H",14400],["1D",86400],["2D",172800],["3D",259200],["1W",604800],["1M","1M"],["1Y","1Y"]];
   var PRO_TFS = { "2m": 1, "3m": 1, "2D": 1, "3D": 1, "1M": 1, "1Y": 1 };   // marcate vizual ca Pro in demo
@@ -96,6 +96,22 @@
   function tfName() { return TFS.filter(function (t) { return t[1] === tfSec; })[0][0]; }
 
   var chart = TRCharts.createChart(document.getElementById("chart"), {
+    timeframes: {
+      list: TFS.map(function (t) { return { label: t[0] + (PRO_TFS[t[0]] ? "\u2605" : ""), value: String(t[1]) }; }),
+      active: "3600",
+      onSelect: function (v) {
+        var pair = TFS.filter(function (t) { return String(t[1]) === v; })[0];
+        if (!pair) return;
+        tfSec = pair[1];
+        chart.opt.timeframes.active = v;
+        var tfBarEl = document.getElementById("tfs");
+        tfBarEl.querySelectorAll("button").forEach(function (x) {
+          x.className = x.textContent.replace("\u2605", "\u2605") === (PRO_TFS[pair[0]] ? pair[0] + "\u2605" : pair[0]) ? "on" : "";
+        });
+        if (liveSymbol) loadReal(liveSymbol);
+        else load();
+      },
+    },
     symbolSearch: {
       search: function (q, cb) {
         loadSymbols(function (list) {
@@ -133,6 +149,8 @@
     if (tf[1] === tfSec) b.className = "on";
     b.addEventListener("click", function () {
       tfSec = tf[1];
+      chart.opt.timeframes.active = String(tf[1]);
+      chart._paintHeader();
       tfBar.querySelectorAll("button").forEach(function (x) { x.className = x === b ? "on" : ""; });
       if (liveSymbol) loadReal(liveSymbol);
       else load();
