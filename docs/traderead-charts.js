@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.2.0
+ * TradeRead Charts v1.3.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
@@ -203,6 +203,7 @@
     cursor: SVGI('<path d="M4 2 L12 8.5 L8.2 9.3 L6.2 13.5 Z" fill="currentColor" stroke="none"/>'),
     trend: SVGI('<line x1="3" y1="13" x2="13" y2="3"/><circle cx="3" cy="13" r="1.4" fill="currentColor" stroke="none"/><circle cx="13" cy="3" r="1.4" fill="currentColor" stroke="none"/>'),
     hline: SVGI('<line x1="2" y1="8" x2="14" y2="8"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/>'),
+    measure: SVGI('<rect x="2.5" y="5.5" width="11" height="5" rx="1"/><line x1="5" y1="5.5" x2="5" y2="8"/><line x1="8" y1="5.5" x2="8" y2="9"/><line x1="11" y1="5.5" x2="11" y2="8"/>'),
     rect: SVGI('<rect x="3" y="4.5" width="10" height="7" rx="1"/>'),
     fib: SVGI('<line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="13.5" y2="8" opacity="0.55"/><line x1="2.5" y1="12" x2="13.5" y2="12"/>'),
     text: SVGI('<path d="M4 4 H12 M8 4 V12.5" />'),
@@ -255,7 +256,8 @@
     }
     var toolBtns = {};
     [[ICONS.cursor, "Select / move", null], [ICONS.trend, "Trend line", "trend"], [ICONS.hline, "Horizontal line", "hline"],
-     [ICONS.rect, "Rectangle", "rect"], [ICONS.fib, "Fibonacci retracement", "fib"], [ICONS.text, "Text", "text"]].forEach(function (t) {
+     [ICONS.rect, "Rectangle", "rect"], [ICONS.fib, "Fibonacci retracement", "fib"], [ICONS.text, "Text", "text"],
+     [ICONS.measure, "Measure \u2014 price move, % and span", "measure"]].forEach(function (t) {
       toolBtns[t[2] || "cursor"] = btn(t[0], t[1], function (b) { self.setTool(t[2]); mark(t[2] ? b : toolBtns.cursor); });
     });
     mark(toolBtns.cursor);
@@ -1405,6 +1407,61 @@
       } else if (d.type === "trend") {
         c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
         if (sel) { c.fillRect(x1 - 3, y1 - 3, 6, 6); c.fillRect(x2 - 3, y2 - 3, 6, 6); }
+      } else if (d.type === "measure") {
+        // A ruler answers three questions at once — how far, how far in
+        // percent, and over how long — so all three are on the box. The
+        // percentage is measured from the FIRST point: dragging from the low
+        // to the high is a rise, and the sign follows the drag, not the chart.
+        var mUp = d.p2 >= d.p1;
+        var mCol = mUp ? (this.opt.upColor || "#22c55e") : (this.opt.downColor || "#ef4444");
+        var mx = Math.min(x1, x2), my = Math.min(y1, y2);
+        var mw = Math.abs(x2 - x1), mh = Math.abs(y2 - y1);
+        c.save();
+        c.fillStyle = mUp ? "rgba(34,197,94,0.13)" : "rgba(239,68,68,0.13)";
+        c.fillRect(mx, my, mw, mh);
+        c.strokeStyle = mCol; c.lineWidth = 1;
+        c.strokeRect(Math.round(mx) + 0.5, Math.round(my) + 0.5, Math.round(mw), Math.round(mh));
+        // vertical arrow through the middle, pointing the way the move went
+        var amx = mx + mw / 2;
+        c.beginPath(); c.moveTo(amx, y1); c.lineTo(amx, y2); c.stroke();
+        var ah = y2 >= y1 ? -5 : 5;
+        c.beginPath(); c.moveTo(amx, y2); c.lineTo(amx - 4, y2 + ah); c.lineTo(amx + 4, y2 + ah);
+        c.closePath(); c.fillStyle = mCol; c.fill();
+
+        var dPrice = d.p2 - d.p1;
+        var dPct = d.p1 ? (dPrice / Math.abs(d.p1)) * 100 : 0;
+        var digits = Math.abs(d.p1) >= 1000 ? 2 : (Math.abs(d.p1) >= 1 ? 2 : 5);
+        var nBars = Math.abs(Math.round(this.xToIndex(x2) - this.xToIndex(x1)));
+        var secs = Math.abs((d.t2 || 0) - (d.t1 || 0));
+        var span = "";
+        if (secs >= 86400) span = Math.floor(secs / 86400) + "d " + Math.floor((secs % 86400) / 3600) + "h";
+        else if (secs >= 3600) span = Math.floor(secs / 3600) + "h " + Math.floor((secs % 3600) / 60) + "m";
+        else span = Math.max(1, Math.round(secs / 60)) + "m";
+        var sign = dPrice >= 0 ? "+" : "\u2212";
+        var l1 = sign + fmtPrice(Math.abs(dPrice), digits) + "  (" + sign + Math.abs(dPct).toFixed(2) + "%)";
+        var l2 = nBars + (nBars === 1 ? " bar" : " bars") + " \u00b7 " + span;
+
+        c.font = "700 11px -apple-system, 'Segoe UI', sans-serif";
+        var w1 = c.measureText(l1).width;
+        c.font = "600 10px -apple-system, 'Segoe UI', sans-serif";
+        var w2 = c.measureText(l2).width;
+        var bw = Math.max(w1, w2) + 16, bh = 32;
+        // sit above the end point, and flip below when there is no room
+        var bx = clamp(amx - bw / 2, 2, Math.max(2, this._plotW() - bw - 2));
+        var by = (y2 <= y1) ? y2 - bh - 6 : y2 + 6;
+        if (by < pp.y0 + 2) by = y2 + 6;
+        if (by + bh > pp.y0 + pp.h - 2) by = Math.max(pp.y0 + 2, y2 - bh - 6);
+        c.fillStyle = mCol;
+        if (c.roundRect) { c.beginPath(); c.roundRect(bx, by, bw, bh, 5); c.fill(); }
+        else c.fillRect(bx, by, bw, bh);
+        c.fillStyle = "#fff";
+        c.font = "700 11px -apple-system, 'Segoe UI', sans-serif";
+        c.fillText(l1, bx + 8, by + 14);
+        c.font = "600 10px -apple-system, 'Segoe UI', sans-serif";
+        c.globalAlpha = 0.85;
+        c.fillText(l2, bx + 8, by + 26);
+        c.restore();
+        if (sel) { c.fillStyle = mCol; c.fillRect(x1 - 3, y1 - 3, 6, 6); c.fillRect(x2 - 3, y2 - 3, 6, 6); }
       } else if (d.type === "rect") {
         c.save(); c.globalAlpha = 0.12;
         c.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
@@ -1455,7 +1512,7 @@
       var x1 = isNum(d.t1) ? this.timeToX(d.t1) : null, y1 = isNum(d.p1) ? pp.toY(d.p1) : null;
       var x2 = isNum(d.t2) ? this.timeToX(d.t2) : null, y2 = isNum(d.p2) ? pp.toY(d.p2) : null;
       if (d.id === this._selected && x2 !== null && Math.abs(x - x2) < 7 && Math.abs(y - y2) < 7 &&
-          (d.type === "rect" || d.type === "fib" || d.type === "trend")) return { d: d, handle: "p2" };
+          (d.type === "rect" || d.type === "fib" || d.type === "trend" || d.type === "measure")) return { d: d, handle: "p2" };
       if (d.id === this._selected && d.type === "text") {
         var fsz = d.size || 12, tw2 = d._tw || (d.text || "").length * fsz * 0.62;
         if (Math.abs(x - (x1 + tw2 + 6)) < 8 && Math.abs(y - y1) < 8) return { d: d, handle: "size" };
@@ -1463,7 +1520,7 @@
       if (d.id === this._selected && d.type === "trend" && Math.abs(x - x1) < 7 && Math.abs(y - y1) < 7) return { d: d, handle: "p1" };
       if (d.type === "hline") { if (Math.abs(y - y1) < 6) return { d: d, handle: null }; }
       else if (d.type === "trend") { if (distToSeg(x, y, { x: x1, y: y1 }, { x: x2, y: y2 }) < 6) return { d: d, handle: null }; }
-      else if (d.type === "rect" || d.type === "fib") {
+      else if (d.type === "rect" || d.type === "fib" || d.type === "measure") {
         if (x >= Math.min(x1, x2) - 4 && x <= Math.max(x1, x2) + 4 &&
             y >= Math.min(y1, y2) - 4 && y <= Math.max(y1, y2) + 4) return { d: d, handle: null };
       } else if (d.type === "text") {

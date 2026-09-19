@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 — 2026-09-19
+
+- **Measure tool** (ruler, in the drawing toolbar): drag between two points
+  and the box reports the move three ways at once — absolute price change,
+  percentage, and the span in bars and in time (`+563.22 (+0.85%)` /
+  `39 bars · 1d 14h`). Green up, red down, with an arrow following the drag,
+  so the sign reads from the direction you dragged rather than from the
+  chart. Selectable, movable and deletable like any other drawing, and it
+  works with touch.
+
 ## 1.2.0 — 2026-09-13
 
 - **In-widget timeframe picker** (`timeframes: {list, active, onSelect}`):
