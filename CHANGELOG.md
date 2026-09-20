@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1 — 2026-09-20
+
+- **`homepage` now points at traderead.ai**, not at the GitHub Pages docs
+  host. No code change — the engine is byte-identical to 1.3.0. The npm
+  listing ranks for the brand name and was sending people to GitHub rather
+  than to the site the library was built for and runs in production on.
+  The documentation stays where it is and is linked from the README and
+  from <https://traderead.ai/charts>, which is now the library's own page.
+
 ## 1.3.0 — 2026-09-19
 
 - **Measure tool** (ruler, in the drawing toolbar): drag between two points
