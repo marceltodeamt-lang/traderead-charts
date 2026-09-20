@@ -58,7 +58,7 @@ npm install traderead-charts
 or straight from a CDN, no build step:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/traderead-charts@1.2.0/src/traderead-charts.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/traderead-charts@1.3.1/src/traderead-charts.js"></script>
 ```
 
 ## Quick start

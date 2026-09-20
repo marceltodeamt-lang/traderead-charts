@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.2 — 2026-09-20
+
+- **README install example unpinned from 1.2.0.** The copy-paste snippet on
+  the npm page still pointed at an old build, so anyone following it landed
+  three releases back, without the measure tool. It now pins 1.3.1. No code
+  change; the engine is byte-identical to 1.3.0.
+
 ## 1.3.1 — 2026-09-20
 
 - **`homepage` now points at traderead.ai**, not at the GitHub Pages docs
