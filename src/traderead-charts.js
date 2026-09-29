@@ -758,6 +758,14 @@
   Chart.prototype.xToIndex = function (x) {
     return this.rightIndex + this.opt.rightPadBars - (this._plotW() - x) / this.barSpacing;
   };
+  // How far past the last bar the view may be dragged: the pad, or half the
+  // plot, whichever is more — in pixels, not bars. Ten bars of slack was 20 px
+  // on a phone at 2 px a bar: the latest candles stayed pinned to the price
+  // axis and could not be brought to the middle to zoom on them (owner's
+  // find, 29 Sep 2026).
+  Chart.prototype._maxRight = function () {
+    return this.bars.length - 1 + Math.max(this.opt.rightPadBars * 2, (this._plotW() * 0.5) / (this.barSpacing || 1));
+  };
   Chart.prototype._visibleRange = function () {
     var lo = Math.floor(this.xToIndex(0)), hi = Math.ceil(this.xToIndex(this._plotW()));
     return [clamp(lo, 0, this.bars.length - 1), clamp(hi, 0, this.bars.length - 1)];
@@ -1938,7 +1946,7 @@
       function step(now) {
         var dt = now - last; last = now;
         self.rightIndex = clamp(self.rightIndex - glide.v * dt / self.barSpacing,
-          0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+          0, self._maxRight());
         self._paint();
         glide.v *= Math.pow(0.94, dt / 16.7);
         if (Math.abs(glide.v) >= 0.05) glide.raf = requestAnimationFrame(step);
@@ -2003,7 +2011,7 @@
         }
         glide.lastX = nowX; glide.lastT = nowT;
         self.rightIndex = drag.right0 + (drag.x0 - nowX) / self.barSpacing;
-        self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        self.rightIndex = clamp(self.rightIndex, 0, self._maxRight());
         if (drag.vpan) {
           var us = self.panes[0].h * (1 - self.opt.volumeHeightPct * 0.35) || 1;
           self._vOff = drag.off0 + (e.clientY - r.top - drag.y0) / us;
@@ -2152,7 +2160,7 @@
       // way every charting tool treats it. Vertical wheel stays zoom.
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         self.rightIndex = clamp(self.rightIndex + e.deltaX / self.barSpacing,
-          0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+          0, self._maxRight());
         self._paint();
         return;
       }
@@ -2209,8 +2217,12 @@
         if (self._draft) { self.drawings.push(self._draft); self._selected = self._draft.id; self._draft = null; self._persist(); self._paintDrawings(); }
         self._dragDraw = null; self._sepDrag = null; drag = null;
         self._touchLock();
-        var dx = e.touches[0].clientX - e.touches[1].clientX;
-        pinch = { d0: Math.abs(dx) || 1, spacing0: self.barSpacing };
+        // Zoom around the fingers, on their real distance: a pinch made with
+        // one finger above the other has almost no horizontal spread, and
+        // measuring only that made the zoom jump.
+        var f0 = e.touches[0], f1 = e.touches[1];
+        pinch = { d0: Math.hypot(f0.clientX - f1.clientX, f0.clientY - f1.clientY) || 1, spacing0: self.barSpacing,
+                  anchor: self.xToIndex((f0.clientX + f1.clientX) / 2 - r.left) };
       }
     }, { passive: true });
     el.addEventListener("touchmove", function (e) {
@@ -2254,9 +2266,16 @@
         return;
       }
       if (pinch && e.touches.length === 2) {
-        var d = Math.abs(e.touches[0].clientX - e.touches[1].clientX) || 1;
-        self.barSpacing = clamp(pinch.spacing0 * d / pinch.d0, self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        var g0 = e.touches[0], g1 = e.touches[1];
+        var pd = Math.hypot(g0.clientX - g1.clientX, g0.clientY - g1.clientY) || 1;
+        var pmx = (g0.clientX + g1.clientX) / 2 - r.left;
+        self.barSpacing = clamp(pinch.spacing0 * pd / pinch.d0, self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        // the bar that was under the fingers stays under them (and follows
+        // them: two fingers also pan)
+        self.rightIndex = clamp(pinch.anchor - (self.xToIndex(pmx) - self.rightIndex), 0, self._maxRight());
         self._paint();
+        // the page must not zoom instead: iOS ignores user-scalable=no
+        e.preventDefault();
       } else if (drag && e.touches.length === 1) {
         var tNowT = performance.now(), tNowX = e.touches[0].clientX - r.left;
         if (glide.lastT) {
@@ -2265,7 +2284,7 @@
         }
         glide.lastX = tNowX; glide.lastT = tNowT;
         self.rightIndex = drag.right0 + (drag.x0 - tNowX) / self.barSpacing;
-        self.rightIndex = clamp(self.rightIndex, 0, self.bars.length - 1 + self.opt.rightPadBars * 2);
+        self.rightIndex = clamp(self.rightIndex, 0, self._maxRight());
         if (drag.vpan) {
           var us2 = self.panes[0].h * (1 - self.opt.volumeHeightPct * 0.35) || 1;
           self._vOff = drag.off0 + (e.touches[0].clientY - r.top - drag.y0) / us2;
@@ -2291,6 +2310,9 @@
       self._touchLock();
     }
     el.addEventListener("touchend", endTouch, { passive: true });
+    // Safari's own pinch events: without this it zooms the whole page.
+    el.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+    el.addEventListener("gesturechange", function (e) { e.preventDefault(); });
     // a browser-fired cancel must COMMIT the in-flight shape, not destroy it
     el.addEventListener("touchcancel", endTouch, { passive: true });
   };

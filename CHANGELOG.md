@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.3 — 2026-09-29
+
+- **The view can be dragged past the last bar by half the plot**, not by ten
+  bars. On a phone at 2 px a bar ten bars were 20 px: the latest candles
+  stayed pinned to the price axis and could not be brought to the middle to
+  zoom on them. The limit is now in pixels; wide bars keep the old ten.
+- **Pinch zooms around the fingers**, and the bar under them stays under
+  them. It used to zoom from the right edge only.
+- **Pinch measures the real distance between the fingers.** A pinch made
+  with one finger above the other has almost no horizontal spread; measuring
+  only that made the zoom jump.
+- **A pinch on the chart never zooms the page instead.** iOS ignores
+  `user-scalable=no`: the touch handler now claims the gesture, and Safari's
+  own `gesturestart` / `gesturechange` are cancelled on the chart.
+
 ## 1.3.2 — 2026-09-20
 
 - **README install example unpinned from 1.2.0.** The copy-paste snippet on
