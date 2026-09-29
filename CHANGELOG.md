@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The version inside the file still reads 1.3.0 (banner) and 1.0.0
+  (`TRCharts.version`); both move to the next release's number, which
+  also brings them in line with package.json again.
+
 ## 1.3.3 — 2026-09-29
 
 - **The view can be dragged past the last bar by half the plot**, not by ten
