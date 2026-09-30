@@ -1,10 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.3.4 — 2026-09-30
 
-- The version inside the file still reads 1.3.0 (banner) and 1.0.0
-  (`TRCharts.version`); both move to the next release's number, which
-  also brings them in line with package.json again.
+- **A pinch on a phone zooms the chart, not the page.** The plot now always
+  carries `touch-action: none`. 1.3.3 cancelled the pinch in `touchmove`,
+  but the browser decides to zoom the page at `touchstart`, before that
+  handler can stop it — on phones the whole page still grew. Nothing else
+  changes: every one-finger move on the plot was already the chart's, so the
+  page never scrolled from there.
+- **The version inside the file matches the package again**: the banner read
+  1.3.0 and `TRCharts.version` 1.0.0 through 1.3.3.
 
 ## 1.3.3 — 2026-09-29
 

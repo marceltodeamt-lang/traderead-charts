@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.3.0
+ * TradeRead Charts v1.3.4
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
@@ -178,6 +178,9 @@
       c.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block;";
       container.appendChild(c);
     });
+    // from the first touch: the browser reads touch-action when the finger
+    // lands, so it must be in place before any gesture (see _touchLock)
+    this.overlay.style.touchAction = "none";
     this.ctx = this.canvas.getContext("2d");
     this.dctx = this.drawCanvas.getContext("2d");
     this.octx = this.overlay.getContext("2d");
@@ -1268,11 +1271,16 @@
     this.el.style.cursor = t ? "crosshair" : "";
     this._touchLock();
   };
-  // While a tool is armed or a shape is being dragged, the chart owns the
-  // touch: without touch-action none the browser steals the gesture, fires
-  // a cancel and kills the line mid-draw (paid for once in production).
+  // The plot owns every touch, always. Without touch-action none the browser
+  // steals the gesture: mid-draw it fires a cancel and kills the line (paid
+  // for once in production), and a pinch zoomed the whole PAGE instead of
+  // the chart on phones (owner's find, 30 Sep 2026) — the browser decides
+  // that at touchstart, before any preventDefault in touchmove can stop it.
+  // Nothing is lost: every one-finger move on the plot was already the
+  // chart's (touchmove prevents the default), so the page never scrolled
+  // from here anyway.
   Chart.prototype._touchLock = function () {
-    this.overlay.style.touchAction = (this.tool || this._draft || this._dragDraw || this._sepDrag || this._axisDrag) ? "none" : "";
+    this.overlay.style.touchAction = "none";
   };
   Chart.prototype.onToolDone = function (cb) { this._toolDoneCb = cb; };
   Chart.prototype.clearDrawings = function () { this.drawings = []; this._draft = null; this._selected = null; this._persist(); this._paintDrawings(); };
@@ -2365,7 +2373,7 @@
   }
 
   global.TRCharts = {
-    version: "1.0.0",
+    version: "1.3.4",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
