@@ -10,6 +10,10 @@
   page never scrolled from there.
 - **The version inside the file matches the package again**: the banner read
   1.3.0 and `TRCharts.version` 1.0.0 through 1.3.3.
+- **Zoom out reaches as far on a phone as on a laptop.** The narrowest bar was
+  1.5 px, so a 310-px phone plot held 200 bars while a laptop held 700; the
+  floor is now whatever fits 750 bars in the plot, when that is smaller than
+  1.5 px (never under 0.25 px). Laptops are practically unchanged.
 
 ## 1.3.3 — 2026-09-29
 

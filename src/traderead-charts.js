@@ -766,6 +766,14 @@
   // on a phone at 2 px a bar: the latest candles stayed pinned to the price
   // axis and could not be brought to the middle to zoom on them (owner's
   // find, 29 Sep 2026).
+  // Zoomed all the way out, a phone shows as many bars as a laptop: the floor
+  // is the option (1.5 px a bar) or whatever fits 750 bars in the plot,
+  // whichever is smaller — a 310-px phone plot held 200 bars at 1.5 px
+  // (owner's find, 30 Sep 2026: "pe mobil pot să fac un zoom out limitat").
+  // Never under 0.25 px; each bar is still drawn at least a pixel wide.
+  Chart.prototype._minSpacing = function () {
+    return Math.max(0.25, Math.min(this.opt.minBarSpacing, this._plotW() / 750));
+  };
   Chart.prototype._maxRight = function () {
     return this.bars.length - 1 + Math.max(this.opt.rightPadBars * 2, (this._plotW() * 0.5) / (this.barSpacing || 1));
   };
@@ -1976,7 +1984,7 @@
       if (self._axisDrag) {
         var ad = self._axisDrag;
         if (ad.axis === "price") self._vZoom = clamp(ad.z0 * Math.exp((self._cross.y - ad.y0) * 0.004), 0.15, 8);
-        else self.barSpacing = clamp(ad.s0 * Math.exp((self._cross.x - ad.x0) * 0.004), self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        else self.barSpacing = clamp(ad.s0 * Math.exp((self._cross.x - ad.x0) * 0.004), self._minSpacing(), self.opt.maxBarSpacing);
         self._paint();
         return;
       }
@@ -2174,7 +2182,7 @@
       }
       var anchor = self.xToIndex(x);
       var k = Math.exp(-e.deltaY * 0.0015);
-      self.barSpacing = clamp(self.barSpacing * k, self.opt.minBarSpacing, self.opt.maxBarSpacing);
+      self.barSpacing = clamp(self.barSpacing * k, self._minSpacing(), self.opt.maxBarSpacing);
       self.rightIndex = anchor - (self.xToIndex(x) - self.rightIndex);
       self._paint();
     }, { passive: false });
@@ -2239,7 +2247,7 @@
         var aax = e.touches[0].clientX - r.left, aay = e.touches[0].clientY - r.top;
         var ad2 = self._axisDrag;
         if (ad2.axis === "price") self._vZoom = clamp(ad2.z0 * Math.exp((aay - ad2.y0) * 0.004), 0.15, 8);
-        else self.barSpacing = clamp(ad2.s0 * Math.exp((aax - ad2.x0) * 0.004), self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        else self.barSpacing = clamp(ad2.s0 * Math.exp((aax - ad2.x0) * 0.004), self._minSpacing(), self.opt.maxBarSpacing);
         self._paint();
         e.preventDefault();
         return;
@@ -2277,7 +2285,7 @@
         var g0 = e.touches[0], g1 = e.touches[1];
         var pd = Math.hypot(g0.clientX - g1.clientX, g0.clientY - g1.clientY) || 1;
         var pmx = (g0.clientX + g1.clientX) / 2 - r.left;
-        self.barSpacing = clamp(pinch.spacing0 * pd / pinch.d0, self.opt.minBarSpacing, self.opt.maxBarSpacing);
+        self.barSpacing = clamp(pinch.spacing0 * pd / pinch.d0, self._minSpacing(), self.opt.maxBarSpacing);
         // the bar that was under the fingers stays under them (and follows
         // them: two fingers also pan)
         self.rightIndex = clamp(pinch.anchor - (self.xToIndex(pmx) - self.rightIndex), 0, self._maxRight());
