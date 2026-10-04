@@ -1,7 +1,7 @@
 {
   "name": "traderead-charts",
   "version": "1.3.5",
-  "description": "Complete financial charting widget \u2014 candlesticks, indicators with a pro-style panel, drawing tools, symbol search, themes. Batteries included, zero dependencies, in production on traderead.ai.",
+  "description": "Complete financial charting widget — candlesticks, indicators with a pro-style panel, drawing tools, symbol search, themes. Batteries included, zero dependencies, in production on traderead.ai.",
   "main": "src/traderead-charts.js",
   "files": [
     "src",
