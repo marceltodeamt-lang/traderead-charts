@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.3.4
+ * TradeRead Charts v1.3.5
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
@@ -124,6 +124,21 @@
       v = this.guides[i].value;
       if (v < min) min = v;
       if (v > max) max = v;
+    }
+    // Price lines added with { fit: true } — a trade plan's entry, stop and
+    // targets — widen the price scale so the plan is on screen. One sitting
+    // more than 0.6x the bars' own range away is left out: a far Target 2
+    // squeezed the candles into half the pane (4 Oct 2026). It is pinned to
+    // the pane's edge instead (see the price-line paint).
+    if (this.kind === "price" && isFinite(min) && isFinite(max)) {
+      var span = max - min, pls = this.chart.priceLines, fmin = min, fmax = max;
+      for (i = 0; i < pls.length; i++) {
+        v = pls[i].price;
+        if (!pls[i].fit || !isNum(v) || v < min - 0.6 * span || v > max + 0.6 * span) continue;
+        if (v < fmin) fmin = v;
+        if (v > fmax) fmax = v;
+      }
+      min = fmin; max = fmax;
     }
     if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
     if (min === max) { min -= 0.5; max += 0.5; }
@@ -1246,11 +1261,18 @@
   };
 
 
-  Chart.prototype.addPriceLine = function (price, color, label) {
-    this.priceLines.push({ price: price, color: color || "#8b949e", label: label });
+  // opts.fit: widen the price scale to keep the line in view (see the pane
+  // scale). opts.group: a name, so clearPriceLines(name) removes only that
+  // set. The label is written on the line; the price stays on the axis.
+  Chart.prototype.addPriceLine = function (price, color, label, opts) {
+    opts = opts || {};
+    this.priceLines.push({ price: price, color: color || "#8b949e", label: label, fit: !!opts.fit, group: opts.group || null });
     this._paint();
   };
-  Chart.prototype.clearPriceLines = function () { this.priceLines = []; this._paint(); };
+  Chart.prototype.clearPriceLines = function (group) {
+    this.priceLines = group ? this.priceLines.filter(function (l) { return l.group !== group; }) : [];
+    this._paint();
+  };
   Chart.prototype.onCrosshair = function (cb) { this.crosshairCb = cb; };
   // cb({firstVisible, lastVisible, barsLeft}) after every pan/zoom; fires at
   // most once per paint. barsLeft small = time to prepend history.
@@ -1855,16 +1877,37 @@
     for (i = 0; i < tags.length; i++) {
       var t = tags[i];
       var ty = pp.toY(t.price);
-      if (ty < pp.y0 || ty > pp.y0 + pp.h) continue;
-      c.strokeStyle = t.color; c.lineWidth = 1; c.setLineDash([4, 3]);
-      c.beginPath(); c.moveTo(0, Math.round(ty) + 0.5); c.lineTo(W, Math.round(ty) + 0.5); c.stroke();
-      c.setLineDash([]);
+      // A labelled level outside the frame (a far target) is pinned to the
+      // pane's edge with an arrow, so the plan never silently loses a level;
+      // an unlabelled line outside the frame stays hidden, as before.
+      var offAbove = ty < pp.y0, offBelow = ty > pp.y0 + pp.h;
+      if ((offAbove || offBelow) && !(t.label && !t._last)) continue;
+      if (offAbove) ty = pp.y0 + 10;
+      else if (offBelow) ty = pp.y0 + pp.h - 10;
+      if (!offAbove && !offBelow) {
+        c.strokeStyle = t.color; c.lineWidth = 1; c.setLineDash([4, 3]);
+        c.beginPath(); c.moveTo(0, Math.round(ty) + 0.5); c.lineTo(W, Math.round(ty) + 0.5); c.stroke();
+        c.setLineDash([]);
+      }
       var txt = fmtPrice(t.price, dec);
       c.fillStyle = t._last ? t.color : o.tagBg;
       c.fillRect(W, ty - 9, o.priceAxisWidth, 18);
       c.fillStyle = t._last ? "#0d1117" : o.tagText;
       c.textBaseline = "middle";
       c.fillText(txt, W + 5, ty);
+      // the line says what it is ("TP1", "SL"), just above it at the right edge
+      if (t.label && !t._last) {
+        c.save();
+        c.font = "700 10.5px -apple-system, 'Segoe UI', sans-serif";
+        var lbl = offAbove ? "\u25B2 " + t.label : offBelow ? "\u25BC " + t.label : t.label;
+        var lw = c.measureText(lbl).width;
+        c.globalAlpha = 0.85; c.fillStyle = o.tagBg;
+        c.fillRect(W - lw - 14, ty - 16, lw + 10, 14);
+        c.globalAlpha = 1; c.fillStyle = t.color;
+        c.textAlign = "right"; c.textBaseline = "middle";
+        c.fillText(lbl, W - 9, offAbove ? ty + 1 : ty - 9);
+        c.restore();
+      }
     }
 
     // markers
@@ -2381,7 +2424,7 @@
   }
 
   global.TRCharts = {
-    version: "1.3.4",
+    version: "1.3.5",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },

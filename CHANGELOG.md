@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.5 — 2026-10-04
+
+- **Price lines can carry a trade plan.** `addPriceLine(price, color, label,
+  opts)` now writes the label on the line (the price stays on the axis), and
+  takes `opts.fit` and `opts.group`:
+  - `fit: true` widens the price scale to keep the line on screen, up to 0.6×
+    the visible bars' own range — a far second target used to squeeze the
+    candles into half the pane, so beyond that it is left out;
+  - a labelled line still outside the frame is pinned to the pane's edge with
+    an arrow, so a plan never silently loses a level;
+  - `group: "name"` lets `clearPriceLines("name")` remove just that set;
+    `clearPriceLines()` with no argument still clears every line.
+- Unlabelled lines behave exactly as before.
+
 ## 1.3.4 — 2026-09-30
 
 - **A pinch on a phone zooms the chart, not the page.** The plot now always
