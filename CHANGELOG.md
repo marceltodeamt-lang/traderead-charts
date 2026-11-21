@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.4.0 — 2026-11-21
+
+- **Go to date.** `goToDate: { onGo(target) }` adds a calendar button to the
+  rail and beside the timeframe in the header (so it is there in fullscreen
+  too). It opens a dialog with a date and an optional time, read in UTC like
+  the time axis; impossible and future dates are refused in the dialog. The
+  host receives `{ time, hasTime, label }` and loads its bars, since only it
+  knows its data source. Without the option nothing changes.
+- **`appendBars(bars)`** adds bars after the last one without moving the
+  view — the mirror of `prependBars`, for a chart opened on a past date that
+  scrolls forward.
+- **`indexAtTime(time, contain)`** finds the bar a moment belongs to: with
+  `contain`, the bar whose span holds it; otherwise the first bar at or after
+  it, so a weekend or a holiday lands on the next session. `-1` when every
+  bar is older.
+- **`scrollToIndex(i, frac)`** puts a bar at `frac` of the plot width
+  (default the middle).
+- **`onVisibleRangeChange`** also reports `barsRight`, so a host can load
+  newer bars as the view nears the right edge.
+- **Day separators.** `daySeparators: true` (or `{ dayKey, color }`) draws a
+  dashed line on intraday charts between the last candle of one day and the
+  first of the next — between two candles, never through one. Days are UTC
+  dates by default; `dayKey(time)` lets a host use an exchange's calendar,
+  so an evening session past midnight UTC stays with its day. Off by default.
+
 ## 1.3.5 — 2026-10-04
 
 - **Price lines can carry a trade plan.** `addPriceLine(price, color, label,

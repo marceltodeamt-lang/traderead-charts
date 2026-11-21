@@ -99,6 +99,11 @@ or straight from a CDN, no build step:
 - [x] `tick(price)` with the bucket roll built in — a closed candle always
       opens the next one (a production bug class, ended in the library)
 - [x] Mobile drawing hardening: touch lock while a tool is armed, cancel commits the in-flight shape, one-finger draw/move, two-finger always navigates
+- [x] Go to date: a date and an optional UTC time from the rail or the header;
+      the host loads the bars (`goToDate.onGo`), the library positions them
+      (`appendBars`, `indexAtTime`, `scrollToIndex`, `barsRight`)
+- [x] Day separators on intraday charts, between candles, with a pluggable
+      day (`daySeparators.dayKey`) for exchange calendars
 
 ## Editions (open-core plan)
 

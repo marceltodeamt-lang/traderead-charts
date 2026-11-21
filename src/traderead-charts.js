@@ -1,5 +1,5 @@
 /*!
- * TradeRead Charts v1.3.5
+ * TradeRead Charts v1.4.0
  * Copyright (c) 2026 Marcel Todea / TradeRead — traderead.ai
  * Original work, written from first principles.
  * TradeRead Community License 1.0 (see LICENSE.md): free to use, including
@@ -40,6 +40,15 @@
     // fullscreen widget (owner's find, 12 Sep 2026); inside the frame the
     // picker survives every mode.
     timeframes: null,
+    // {onGo(target)} — a "Go to date" button on the rail (owner, 21 Nov 2026).
+    // target = {time: unix seconds UTC, hasTime: bool, label: "14 Mar 2024 09:30"};
+    // the host loads the bars around it and calls scrollToTime.
+    goToDate: null,
+    // true, or {dayKey(time) → any, color}: on intraday charts a dashed line
+    // between the last candle of one day and the first of the next (owner,
+    // 21 Nov 2026). dayKey defaults to the UTC date; a stock host passes the
+    // exchange's date so an evening session is not cut at midnight UTC.
+    daySeparators: false,
     logo: true,
     ui: true,
     maxIndicators: 0,       // 0 = unlimited (Pro); Standard builds pass 4               // the bundled rail + indicator panel + type switcher + camera
@@ -237,6 +246,7 @@
     heikin: SVGI('<rect x="2.8" y="6" width="3.4" height="6" rx="1.6"/><rect x="9.8" y="3.5" width="3.4" height="6" rx="1.6" fill="currentColor" stroke="none"/>'),
     share: SVGI('<path d="M8 10 V2.8 M5.5 5 L8 2.5 L10.5 5"/><path d="M4 8.5 H3 V13.5 H13 V8.5 H12"/>'),
     fit: SVGI('<path d="M6 2.5 V6 H2.5 M13.5 6 H10 V2.5 M10 13.5 V10 H13.5 M2.5 10 H6 V13.5"/>'),
+    calendar: SVGI('<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><line x1="2.5" y1="6.5" x2="13.5" y2="6.5"/><line x1="5.5" y1="2" x2="5.5" y2="4.5"/><line x1="10.5" y1="2" x2="10.5" y2="4.5"/><path d="M8 8.5 V11.5 M6.5 10 L8 11.5 L9.5 10"/>'),
   };
   var TYPE_LIST = [
     ["candles", "Candles"], ["hollow", "Hollow candles"], ["heikin", "Heikin Ashi"],
@@ -290,6 +300,7 @@
     btn(ICONS.camera, "Screenshot (PNG)", function () { self.snapshot(); });
     btn(ICONS.share, "Share chart", function (b) { self.share(b); });
     btn(ICONS.fit, "Fit chart", function () { self.fit(); });
+    if (o.goToDate && o.goToDate.onGo) btn(ICONS.calendar, "Go to date", function () { self._toggleGoTo(); });
     this.el.appendChild(rail);
     this._rail = rail;
 
@@ -356,6 +367,63 @@
   };
 
   // A picker list, not a blind cycle: seven types, current one checked.
+
+  // ── Go to date ───────────────────────────────────────────────────────
+  // A date and an optional time, read in UTC like the time axis. The host
+  // decides what that means for its data (opt.goToDate.onGo).
+  Chart.prototype._toggleGoTo = function () {
+    var self = this, o = this.opt, cfg = o.goToDate;
+    if (!cfg || !cfg.onGo) return;
+    if (this._goToBox) { this._goToBox.remove(); this._goToBox = null; return; }
+    var wrap = document.createElement("div");
+    wrap.className = "trc-goto";
+    wrap.style.cssText = "position:absolute;inset:0;z-index:22;display:flex;align-items:flex-start;justify-content:center;" +
+      "background:rgba(0,0,0,0.5);padding-top:48px;";
+    var field = "box-sizing:border-box;background:none;border:1px solid " + o.separatorColor + ";border-radius:9px;color:" + o.tagText + ";" +
+      "font:600 14px -apple-system,'Segoe UI',sans-serif;padding:8px 10px;outline:none;color-scheme:" + (/^#(f|e)/i.test(o.background || "") ? "light" : "dark") + ";";
+    var lab = "display:flex;flex-direction:column;gap:4px;font:700 11px -apple-system,'Segoe UI',sans-serif;color:" + o.textColor + ";";
+    var box = document.createElement("form");
+    box.style.cssText = "width:min(360px,92%);background:" + o.background + ";border:1px solid " + o.separatorColor + ";" +
+      "border-radius:14px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,0.4);display:flex;flex-direction:column;gap:10px;";
+    box.innerHTML =
+      '<div style="font:800 14px -apple-system,\'Segoe UI\',sans-serif;color:' + o.tagText + ';">Go to date</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<label style="' + lab + 'flex:1 1 150px;">Date<input type="date" name="d" required style="' + field + 'width:100%;"></label>' +
+        '<label style="' + lab + 'flex:1 1 110px;">Time (UTC, optional)<input type="time" name="t" style="' + field + 'width:100%;"></label>' +
+      "</div>" +
+      '<div data-err style="display:none;font:600 12px -apple-system,sans-serif;color:' + o.downColor + ';"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button type="button" data-act="cancel" style="border:1px solid ' + o.separatorColor + ';background:none;color:' + o.textColor + ';font:700 13px -apple-system,sans-serif;border-radius:9px;padding:7px 14px;cursor:pointer;">Cancel</button>' +
+        '<button type="submit" style="border:none;background:#6366f1;color:#fff;font:700 13px -apple-system,sans-serif;border-radius:9px;padding:7px 16px;cursor:pointer;">Go to</button>' +
+      "</div>";
+    wrap.appendChild(box);
+    this.el.appendChild(wrap);
+    this._goToBox = wrap;
+    var dIn = box.querySelector('input[name="d"]'), tIn = box.querySelector('input[name="t"]'), err = box.querySelector("[data-err]");
+    if (this._goToLast) { dIn.value = this._goToLast.d; tIn.value = this._goToLast.t; }
+    dIn.focus();
+    function close() { wrap.remove(); self._goToBox = null; }
+    wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
+    box.querySelector('[data-act="cancel"]').addEventListener("click", close);
+    box.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+    box.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dIn.value || "");
+      var tm = /^(\d{2}):(\d{2})/.exec(tIn.value || "");
+      if (!dm) { err.textContent = "Pick a date."; err.style.display = "block"; return; }
+      var y = +dm[1], mo = +dm[2] - 1, da = +dm[3];
+      var ms = Date.UTC(y, mo, da, tm ? +tm[1] : 0, tm ? +tm[2] : 0);
+      var chk = new Date(ms);
+      if (chk.getUTCFullYear() !== y || chk.getUTCMonth() !== mo || chk.getUTCDate() !== da) {
+        err.textContent = "That date does not exist."; err.style.display = "block"; return;
+      }
+      if (ms > Date.now()) { err.textContent = "That date is in the future."; err.style.display = "block"; return; }
+      self._goToLast = { d: dIn.value, t: tIn.value };
+      close();
+      cfg.onGo({ time: Math.floor(ms / 1000), hasTime: !!tm,
+        label: da + " " + MONTHS[mo] + " " + y + (tm ? " " + tm[1] + ":" + tm[2] + " UTC" : "") });
+    });
+  };
 
   // ── Symbol search ────────────────────────────────────────────────────
   // The selector ships with the widget; the DATA behind it is pluggable:
@@ -1059,11 +1127,16 @@
       var hasTf = !!(this.opt.timeframes && this.opt.timeframes.list && this.opt.timeframes.list.length);
       h.style.cssText = "position:absolute;left:" + (this.opt.ui ? 56 : 12) + "px;top:10px;z-index:4;display:flex;align-items:baseline;gap:8px;" +
         "font:800 15px -apple-system,'Segoe UI',sans-serif;user-select:none;" +
-        (clickable ? "cursor:pointer;" : (hasTf ? "" : "pointer-events:none;"));
+        (clickable ? "cursor:pointer;" : (hasTf || (this.opt.goToDate && this.opt.goToDate.onGo) ? "" : "pointer-events:none;"));
       var self2 = this;
       if (clickable) h.title = "Search ticker or name";
       // delegare: pastila de TF se reconstruieste la fiecare _paintHeader
       h.addEventListener("click", function (e) {
+        if (e.target.closest && e.target.closest(".trc-goto-btn")) {
+          e.stopPropagation();
+          self2._toggleGoTo();
+          return;
+        }
         if (hasTf && e.target.closest && e.target.closest(".trc-tf-btn")) {
           e.stopPropagation();
           self2._toggleTfMenu();
@@ -1095,6 +1168,11 @@
           'border:1px solid ' + o.separatorColor + ';border-radius:6px;padding:1px 8px;cursor:pointer;">' +
           (this._activeTfLabel() || inf.tf || "TF") + " \u25BE</span>"
         : (inf.tf ? '<span style="color:' + o.textColor + ';font-weight:700;font-size:12px;">' + inf.tf + "</span>" : "")) +
+      // Go to date beside the timeframe, where it is seen (owner, 21 Nov 2026)
+      (o.goToDate && o.goToDate.onGo
+        ? '<span class="trc-goto-btn" title="Go to date" style="color:' + o.textColor + ';border:1px solid ' + o.separatorColor + ';' +
+          'border-radius:6px;padding:1px 5px;cursor:pointer;display:inline-flex;align-self:center;line-height:0;">' + ICONS.calendar + "</span>"
+        : "") +
       (px ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';">' + px + "</span>" : "") +
       (chg !== null ? '<span style="color:' + (up ? o.upColor : o.downColor) + ';font-weight:700;font-size:12px;">' +
         (up ? "+" : "") + chg.toFixed(2) + "%</span>" : "") +
@@ -1290,6 +1368,42 @@
     this._ha = null;
     if (this.indicators.length) this._applyIndicators();
     else this._paint();
+  };
+  // Newer bars arrive behind the last one (a chart opened on a past date
+  // scrolls forward). The frame stays where it is: rightIndex counts from
+  // the left, so nothing shifts.
+  Chart.prototype.appendBars = function (newer) {
+    if (!newer || !newer.length) return;
+    var cut = this.bars.length ? this.bars[this.bars.length - 1].time : -Infinity;
+    var add = newer.filter(function (b) { return b.time > cut; }).sort(function (a, b) { return a.time - b.time; });
+    if (!add.length) return;
+    this.bars = this.bars.concat(add);
+    this._ha = null;
+    this._paintHeader();
+    if (this.indicators.length) this._applyIndicators();
+    else this._paint();
+  };
+  // The bar a moment belongs to: the one that contains it, else the first
+  // one after it (a weekend or a holiday lands on the next session). -1 when
+  // every bar is older.
+  Chart.prototype.indexAtTime = function (t, contain) {
+    var b = this.bars, sec = this._barSec || 3600;
+    for (var i = 0; i < b.length; i++) {
+      if (b[i].time >= t) return i;
+      if (contain && t < b[i].time + sec && (i + 1 >= b.length || b[i + 1].time > t)) return i;
+    }
+    return -1;
+  };
+  // Put that bar at `frac` of the plot width from the left (default: the
+  // middle; a whole day reads better starting at a quarter).
+  Chart.prototype.scrollToIndex = function (i, frac) {
+    if (!this.bars.length) return;
+    i = clamp(i, 0, this.bars.length - 1);
+    var f = isNum(frac) ? clamp(frac, 0, 1) : 0.5;
+    // indexToX: x = W - (rightIndex + rightPadBars - i) * spacing
+    var right = (this._plotW() / (this.barSpacing || 1)) * (1 - f) - this.opt.rightPadBars;
+    this.rightIndex = clamp(Math.round(i + right), 0, this._maxRight());
+    this._paint();
   };
   // ── Drawings ─────────────────────────────────────────────────────────
   // The production widget's full set, ported (it is TradeRead code): trend,
@@ -1582,7 +1696,7 @@
     // the mounted chrome carries colors from mount time — remount it in the
     // new palette (open panels close; their state is one click away)
     if (this._rail) {
-      ["_rail", "_indPanel", "_typeMenu", "_styleChip", "_searchBox", "_fsBtn"].forEach(function (k) {
+      ["_rail", "_indPanel", "_typeMenu", "_styleChip", "_searchBox", "_fsBtn", "_goToBox"].forEach(function (k) {
         if (this[k]) { this[k].remove(); this[k] = null; }
       }, this);
       this._mountUI();
@@ -1642,6 +1756,29 @@
       lastDay = key;
       c.fillStyle = o.textColor;
       c.fillText(label, x - c.measureText(label).width / 2, H + 7);
+    }
+
+    // day separators: between candles, never through one
+    if (o.daySeparators && (this._barSec || 3600) < 86400 && this.bars.length > 1) {
+      var ds = typeof o.daySeparators === "object" ? o.daySeparators : {};
+      var dayOf = ds.dayKey || function (t) { return Math.floor(t / 86400); };
+      c.save();
+      c.strokeStyle = ds.color || o.separatorColor;
+      c.lineWidth = 1;
+      c.setLineDash([4, 4]);
+      var prevDay = dayOf(this.bars[Math.max(0, lo - 1)].time);
+      for (i = Math.max(1, lo); i <= hi; i++) {
+        b = this.bars[i]; if (!b) continue;
+        var dk = dayOf(b.time);
+        if (dk !== prevDay) {
+          x = this.indexToX(i) - this.barSpacing / 2;
+          if (x >= 0 && x <= W) {
+            c.beginPath(); c.moveTo(Math.round(x) + 0.5, 0); c.lineTo(Math.round(x) + 0.5, H); c.stroke();
+          }
+        }
+        prevDay = dk;
+      }
+      c.restore();
     }
 
     // ── price pane ──
@@ -1950,7 +2087,7 @@
     this._paintCross();
     if (this._rangeCb) {
       var vr = this._visibleRange();
-      this._rangeCb({ firstVisible: vr[0], lastVisible: vr[1], barsLeft: vr[0] });
+      this._rangeCb({ firstVisible: vr[0], lastVisible: vr[1], barsLeft: vr[0], barsRight: this.bars.length - 1 - vr[1] });
     }
   };
 
@@ -2424,7 +2561,7 @@
   }
 
   global.TRCharts = {
-    version: "1.3.5",
+    version: "1.4.0",
     themes: THEMES,
     resample: resample,
     createChart: function (el, options) { return new Chart(el, options); },
